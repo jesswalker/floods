@@ -1,0 +1,152 @@
+---
+title: "HUC8 stream gage/Pekel data comparison"
+output: html_notebook
+fontsize: 9
+editor_options: 
+  chunk_output_type: inline
+---
+
+```{r setup, echo = FALSE}
+library(ggplot2)
+```
+### Overview
+This document describes leveraging the correlation between stream gage discharge data (ft<sup>3</sup>/s) and Pekel monthly surface water data in order to fill gaps in the Pekel data record due to clouds.
+
+Stream gage information is from HUC8 18040008 Upper Merced (https://waterdata.usgs.gov/nwis/). Volume streamflow discharge data from all gages with complete records from 2006 through 2015 (3 of 22 listed gages) were output to individual *.csv files. The files were merged with Pekel data. The consolidated file is accessed on Google drive through its URL:
+```{r, warning=FALSE}
+data_url = "1t6XaZANrVRMShni8Xo_0Ok7esSM2vqBt"
+x <- read.csv(sprintf("https://docs.google.com/uc?id=%s&export=download", data_url))
+```
+  
+
+Header of consolidated data file:
+```{r, echo=FALSE, warning=FALSE}
+x$date <- as.Date(with(x, sprintf("%d-%02d-01", year, month)), "%Y-%m-%d")
+x$fileName <- NULL # file info is not necessary
+x_original <- x
+head(x)
+```   
+<br>
+The raw Pekel data for this HUC include multiple NA values:
+
+```{r, warning=FALSE, echo=FALSE}
+ggplot(x_original, aes(date, water)) + 
+  geom_line() + 
+  geom_point() +     
+  theme_bw() +
+  xlab("Date") +
+  ylab('Pekel monthly water')
+
+```
+
+
+### Individual site correlations  
+Correlations between discharge volumes and Pekel monthly water vary among the 3 examined HUCs.  
+<br>
+
+#### **SG 11264500 Happy Isles Bridge, Yosemite**
+**Pekel water vs. stream gage correlation**  
+
+```{r, echo=FALSE}
+cor(x$sg_11264500, x$water, use = "complete.obs")
+
+```
+```{r, echo = FALSE, warning = FALSE}
+ggplot(x, aes(sg_11264500, water)) + 
+  geom_point() + 
+  theme_bw() +
+  xlab(bquote('Stream gage discharge (' ~ft^3~s^-1*')')) +
+  ylab('Pekel monthly water') +
+  geom_smooth(method = "lm", se = FALSE, color = "red")
+```
+
+<br>  
+
+#### **SG 11266500 Pohono Bridge, Yosemite**
+**Pekel water vs. stream gage correlation**  
+```{r, echo=FALSE}
+cor(x$sg_11266500, x$water, use = "complete.obs")
+```
+```{r, echo = FALSE, warning = FALSE}
+ggplot(x, aes(sg_11266500, water)) + 
+  geom_point() + 
+  theme_bw() +
+  xlab(bquote('Stream gage discharge ('~ft^3~s^-1*')')) +
+  ylab('Pekel monthly water') +
+  geom_smooth(method = "lm", se = FALSE, color = "red")
+```
+<br>
+
+#### **SG 11270900 Merced Falls Dam, Snell**
+**Pekel water vs. stream gage correlation**  
+```{r, echo=FALSE, eval=TRUE}
+cor(x$sg_11270900, x$water, use = "complete.obs")
+```
+
+```{r, echo = FALSE, warning = FALSE}
+ggplot(x, aes(sg_11270900, water)) + 
+  geom_point() + 
+  theme_bw() +
+  xlab(bquote('Stream gage discharge ('~ft^3~s^-1*')')) +
+  ylab('Pekel monthly water') +
+  geom_smooth(method = "lm", se = FALSE, color = "red")
+```
+This correlation is relatively linear until ~2800 ft<sup>3</sup>/s. The maximum stream gage discharge amount for the months with no Pekel data is lower than that threshold:
+```{r}
+max_pekel <- max(x[which(is.na(x$water)), "sg_11270900"])
+print(max_pekel)
+```
+Restricting the stream gage data range to that amount + additional value (200 ft<sup>3</sup>/s) yields a higher correlation:
+
+```{r, echo=FALSE}
+x.sub <- subset(x, sg_11270900 <= max_pekel + 200)
+cor(x.sub$sg_11270900, x.sub$water, use = "complete.obs")
+```
+```{r, echo = FALSE, warning = FALSE}
+ggplot(x.sub, aes(sg_11270900, water)) + 
+  geom_point() + 
+  theme_bw() +
+  xlab(bquote('Stream gage discharge ('~ft^3~s^-1*')')) +
+  ylab('Pekel monthly water') +
+  geom_smooth(method = "lm", se = FALSE, color = "red")
+```
+If we calculate the linear equation of the fit
+```{r, echo=FALSE}
+fit <- lm(water~sg_11270900, data = x.sub)
+summary(fit)
+```
+```{r, echo = FALSE}
+# assign coefficients from lm summary
+b <- summary(fit)$coefficients[1,1]
+m <- summary(fit)$coefficients[2,1]
+```
+
+and replace missing Pekel data water values with the resulting equation
+
+$y = `r b` + `r m`x_i$
+
+```{r, echo = FALSE}
+x[which(is.na(x$water)), 'water'] <- x[which(is.na(x$water)), 'sg_11270900']*m + b
+```
+
+where x = stream gage value, the resulting plot shows how the estimated data fills gaps in the Pekel record:
+
+
+```{r, warning=FALSE, echo=FALSE}
+# Add a tag that distinguishes estimated from original data
+x$db  <- 'Estimated data'
+x_original$db <- "Original data" 
+
+# Combine estimated and original data for plotting purposes
+x_combined = rbind(x_original, x)
+
+ggplot(x_combined, aes(date, water, group = db)) + 
+  geom_line(aes(color = db, size = db)) + 
+  geom_point(data=x[which(is.na(x_original$water)), ], aes(x=date, y=water), color = 'red') +     
+  geom_point(data=x[which(!is.na(x_original$water)), ], aes(x=date, y=water), color = 'black') +
+  scale_size_manual("Dataset", values = c(0.3, 0.8), labels = c("Estimated data", "Original data")) + 
+  scale_color_manual("Dataset", values = c("red", "black"), labels = c("Estimated data", "Original data")) + 
+  theme_bw() +
+  xlab("Date") +
+  ylab('Pekel monthly water')
+```
