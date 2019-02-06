@@ -1,0 +1,45 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+```{r setup, echo = FALSE, include=FALSE}
+library(ggplot2)
+library(reshape2) # for reshaping data format
+library(dplyr) # for correlations by factor
+library(knitr) # for formatting tables, BUT doensn't seem to work unless knitting
+```
+### Overview
+This document describes leveraging the correlation between monthly stream gage discharge data (ft<sup>3</sup>/s) and Pekel monthly surface water data in order to fill gaps in the Pekel data record.
+
+Stream gage information is from **HUC8 18040008 Upper Merced** (https://waterdata.usgs.gov/nwis/). Volume streamflow discharge data from all gages with complete records from 2006 through 2015 (3 of 22 listed gages) were output to individual *.csv files and merged with Pekel data. The consolidated file is accessed on Google drive through its URL:
+```{r, warning=FALSE}
+data_url = "1M6P5RJqgTxdazxjJMakKU6qdrBeLwvYr" #1t6XaZANrVRMShni8Xo_0Ok7esSM2vqBt"
+df <- read.csv(sprintf("https://docs.google.com/uc?id=%s&export=download", data_url))
+```
+
+```{r, echo=FALSE, warning=FALSE, include=FALSE}
+# Get rid of extraneous columns before reshaping
+x <- df
+x$date <- as.Date(with(x, sprintf("%d-%02d-01", year, month)), "%Y-%m-%d")
+cols_to_keep <- c("date", "water", "water_km2", "water_gee", "sg_11264500", "sg_11266500", "sg_11270900")
+x <- x[, cols_to_keep]
+x$water_gee <- x$water_gee * 0.0009  # convert from # of pixels to km^2: 900 m^2/pixel x 1e-06 km^2/m^2
+
+```   
+
+```{r}
+# Reformat data to long format for plotting. First reshape the gage data--
+x.long <- melt(x, id.vars = c("water", "date", "water_km2", "water_gee" ), variable.name = "gage", value.name = "discharge")
+
+# --then the pekel data
+x.long <- melt(x.long, id.vars = c("date", "gage", "discharge"), variable.name = "pekel")
+```
+
+```{r}
+
+ggplot(x.long, aes(date, log10(value), group = pekel, linetype = pekel, size = pekel)) +
+  geom_line(aes(color=pekel, linetype = pekel)) + 
+  scale_linetype_manual(values = c("solid", "dashed", "solid")) +
+  scale_size_manual(values = c(0.7, 1.2, .4))+
+  theme_bw()
+```

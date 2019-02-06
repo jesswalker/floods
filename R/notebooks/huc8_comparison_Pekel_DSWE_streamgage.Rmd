@@ -1,0 +1,124 @@
+---
+title: "HUC8 stream gage/Pekel/DSWE data comparison"
+output: html_notebook
+fontsize: 9
+editor_options: 
+  chunk_output_type: inline
+---
+
+```{r setup, echo = FALSE, include=FALSE}
+library(ggplot2)
+library(reshape2) # for reshaping data format
+library(dplyr) # for correlations by factor
+library(knitr) # for formatting tables, BUT doensn't seem to work unless knitting
+```
+### Overview
+This document describes the comparison of monthly stream gage discharge data (ft<sup>3</sup>/s) with two imagery-derived water extents: Global Surface Water monthly water data (Pekel et al.) and monthly maximum surface water extents (Dynamic Surface Water Extent [Jones et al.; DSWE]).
+
+Stream gage information is from **HUC8 18040008 Upper Merced** (https://waterdata.usgs.gov/nwis/). Volume streamflow discharge data from all gages with complete records from 2006 through 2015 (3 of 22 listed gages) were output to individual *.csv files and merged with Pekel data. The consolidated file is accessed on Google drive through its URL:
+```{r, warning=FALSE}
+# PEKEL
+data_url = "1M6P5RJqgTxdazxjJMakKU6qdrBeLwvYr" #1t6XaZANrVRMShni8Xo_0Ok7esSM2vqBt"
+df <- read.csv(sprintf("https://docs.google.com/uc?id=%s&export=download", data_url))
+```
+
+
+```{r, echo=FALSE, warning=FALSE, include=FALSE}
+# Pekel
+
+# Get rid of extraneous columns before reshaping
+x <- df
+x$date <- as.Date(with(x, sprintf("%d-%02d-01", year, month)), "%Y-%m-%d")
+cols_to_keep <- c("date", "water_gee", "sg_11264500", "sg_11266500", "sg_11270900")
+x <- x[, cols_to_keep]
+x$water_gee <- x$water_gee * 0.0009  # convert from # of pixels to km^2: 900 m^2/pixel x 1e-06 km^2/m^2
+colnames(x)[colnames(x)=="water_gee"] <- "pekel"
+
+```   
+<br>
+
+```{r, echo=FALSE}
+# PEKEL
+# Lag Pekel water data by 1 month
+x <- x %>% mutate(lag.pekel = dplyr::lead(pekel, n=1, default = NA))
+
+# Reformat data to long format for plotting. First reshape the gage data--
+x.long <- melt(x, id.vars = c("pekel", "date", "lag.pekel"), variable.name = "gage", value.name = "discharge")
+
+```
+
+```{r, warning=FALSE}
+# DSWE
+
+#https://drive.google.com/open?id=1uPRWSMCoMXX_R7QRPUuNOkUvziDq8rhj
+data_url = "1uPRWSMCoMXX_R7QRPUuNOkUvziDq8rhj"
+df2 <- read.csv(sprintf("https://docs.google.com/uc?id=%s&export=download", data_url))
+```
+
+```{r, echo=FALSE}
+# DSWE
+x2 <- df2
+x2$date <- substring(x2$date, 7,12) # Extract date
+x2$date <- as.Date(paste0(as.character(x2$date), '01'), format='%Y%m%d') #Set date to month
+
+# Remove extraneous columns
+cols_to_keep <- c("date", "X1", "X2", "X3")
+x2 <- x2[, cols_to_keep]
+
+# Remove extraneous row
+x2 <- x2[-1, ]
+
+```
+
+```{r, echo=FALSE}
+# Lag DSWE water data by 1 month
+x2$sum <- x2$X1 #+ x2$X2 + 0.5*x2$X3
+x2 <- x2 %>% mutate(lag.sum = dplyr::lead(sum, n=1, default = NA))
+x2.long <- melt(x2, id.vars = "date", variable.name = "dswe_class", value.name = "dswe_val")
+x2.long$dswe_val <- x2.long$dswe_val/1000
+
+# put in mock gage class
+x2.long$gage <- "none"
+```
+
+Plotting individual stream gage data together with Pekel data yields the following.  Pekel data are in areal units, but have been scaled for display purposes.
+
+```{r, warning=FALSE, echo=FALSE}
+ggplot(subset(x.long, gage == "sg_11270900"), aes(date, discharge, group = gage, color = gage)) + 
+ # geom_point() + 
+  geom_line() +
+  theme_bw() +
+  xlab("Date") +
+  ylab(bquote('Discharge ('~ft^3~s^-1*')')) +
+  scale_color_discrete(name = "Stream gage", labels = c("11264500", "11266500", "11270900")) +
+
+  # Force Pekel legend to appear by including a manufactured category in aes (here, gage[1])
+  geom_line(data=x.long, aes(date, pekel*100, linetype = gage[1]), color = "black", size = 1.3) +
+  scale_linetype_manual(name = "Pekel", values = ("solid"), labels = ("Pekel water extent")) +
+  
+  # DSWE data
+  geom_line(data=subset(x2.long, dswe_class == "sum" & date > "2005-01-01" & date < "2016-01-01"), aes(date, dswe_val*10, size = gage[1]), color = "purple") +
+  scale_size_manual(name = "DSWE", values = (0.9), labels = "DSWE water extent")
+
+```
+
+
+
+```{r}
+
+#chunks:
+x2.long$gage <- NULL # take gage back out
+
+test <- merge(x.long, x2.long, by = "date")
+
+cor_all <- test %>% group_by(dswe_class) %>% summarize(cor=cor(discharge, dswe_val, use = "complete.obs"))
+
+cor_all <- test %>% group_by(dswe_class, gage) %>% summarize(cor=cor(discharge, dswe_val, use = "complete.obs"))
+
+cor_all <- test %>% group_by(gage) %>% summarize(cor=cor(discharge, pekel, use = "complete.obs"))
+
+test.sub <- subset(test, date > "2005-01-01" & date < "2016-01-01" & gage == "sg_11264500" & dswe_class!= "lag.sum")
+
+ggplot(test.sub, aes(date, dswe_val, group = dswe_class, color = dswe_class)) + geom_line() + geom_point() + geom_line(data=test.sub, aes(date, lag.pekel*10), color = "black", size = 1.2)
+```
+

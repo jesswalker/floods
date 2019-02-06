@@ -1,0 +1,312 @@
+---
+title: "Buffered Pekel data vs gage data"
+output: html_notebook
+fontsize: 9
+editor_options: 
+  chunk_output_type: inline
+---
+
+Here we use stream gage height data to fill gaps in the coincident Pekel JRC Global Surface Water timeseries.  Monthly data are used in both cases, limited to HUC 18020116. Pekel data are restricted to a 500-m buffer around each stream.
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+library(dataRetrieval) # USGS data retrieval 
+library(ggplot2)
+library(tidyr) #lm calc
+library(dplyr) # slicing data
+library(data.table) #fread
+library(leaflet) #maps
+library(maps) #maps
+library(rgdal) #maps
+library(sf) #shapefile
+library(reticulate) #python 
+library(knitr) # format table
+library(kableExtra)  #format table
+
+#pd <- import('pandas')
+```
+
+```{python, echo=FALSE, include=FALSE}
+
+
+import pandas as pd
+import geopandas as gpd
+import sys
+print(sys.version)
+
+import matplotlib.pyplot as plt
+plt.plot([0,2,1,4])
+plt.show()
+
+import numpy as np
+import os
+
+
+```
+**Maximum monthly water extent - Pekel data**
+
+```{r, echo=FALSE, warning=FALSE}
+
+# -------------------------
+# Pekel - read in data
+# -------------------------
+
+huc_num <- "18020116"
+
+# Get Pekel monthly composites within 500m of streams in CV hucs
+data_url = "1amcdHV9V3DXsS_fAgBMvX7E1WhZMyiKm"
+df <- read.csv(sprintf("https://docs.google.com/uc?id=%s&export=download", data_url))
+
+# Format data
+pk <- df
+pk$date <- as.Date(pk$date, format = "%Y-%m-%d")
+
+# X0 = no data, # X1 = not water # X2 = water
+cols_to_keep <- c("date", "huc8", "X2")
+pk <- pk[, cols_to_keep]
+
+pk$X2 <- pk$X2 * 0.0009   # convert from  #pixels to km^2: 900 m^2/pixel x 1e-06 km^2/m^2
+colnames(pk)[which(colnames(pk)=="X2")] <- "water"
+pk <- subset(pk, huc8 == "18020116")
+
+ggplot(pk, aes(date, water)) + 
+  geom_line() + 
+  geom_point() +
+  theme_bw() +
+  xlab("Date") +
+  ylab(bquote('Water extent ('~km^2*')')) +
+  geom_hline(color = 'red', linetype = "dashed", yintercept = 55)
+ # geom_point(aes(x=as.Date('1992-05-01'), y=55), color = "red")
+  
+ 
+```
+There's a lot of drop-out data in the time series, so the data need to be cleaned up first. 
+
+As a 1st-round cut, simply use the lowest "real" data value as a minimum threshold. Here that appears to be ~55 (red line). Replace all values < 55 with NA.
+
+**Cleaned-up plot**
+
+The result is better, though some spurious values are still apparent. One question is how much to clean those up prior to subsequent processing.
+```{r, echo=FALSE, warning=FALSE}
+
+pk$water[which(pk$water < 55)] <- NA
+
+
+ggplot(pk, aes(date, water)) + 
+  geom_line() + 
+  geom_point() +
+  theme_bw() +
+  xlab("Date") +
+  ylab(bquote('Water extent ('~km^2*')')) +
+  geom_hline(color = 'red', linetype = "dashed", yintercept = 55)
+```
+**Stream gage data**  
+
+Directly query NWIS for monthly stream gage data after filtering for HUC and time constraints (data through at least 2000).
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE, include=FALSE}
+
+# -------------------------------------------
+# Stream gage - read in all gage info for CA
+# ------------------------------------------
+
+# Issue: the gages don't always have HUC numbers that correspond to the HUC region they're located in
+
+# Get general info about all gages in a given huc from NWIS
+df <- fread(sprintf("https://waterservices.usgs.gov/nwis/site/?format=rdb&huc=%s&seriesCatalogOutput=true&siteStatus=all&hasDataTypeCd=dv,aw", huc_num), check.names = FALSE, header=TRUE)
+g <- df
+```
+
+
+```{r, echo=FALSE, warning=FALSE,message=FALSE}
+
+# Data type values are defined here: https://waterservices.usgs.gov/rest/Site-Service.html#outputDataTypeCd
+# 00060 = discharge (cu ft/s)
+# 00065 = gage height (ft)
+
+# -------------------------------------
+# Stream gage - set selection criteria
+# -------------------------------------
+
+# Format dates of data retrieval
+g$begin_date <- as.Date(g$begin_date, format = "%Y-%m-%d")
+g$end_date <- as.Date(g$end_date, format = "%Y-%m-%d")
+
+# Get gages that have an end date in the 21st century
+g.sub <- subset(g, end_date > "2000-01-01")
+
+# Calculate the amt of active time for each gage
+g.sub$time_active <- g.sub$end_date - g.sub$begin_date
+
+# site_no needs to be a number
+g.sub$site_no <- as.numeric(g.sub$site_no)
+
+# Check if there are > 10 sites (url can't take > 10 at a time) ## no longer necessary since we're grabbing individual sites
+sites <- unique(g.sub$site_no)
+
+# Make sure site names have 8 characters; others aren't recognized in the automatic retrieval URL
+sites <- subset(sites, nchar(sites) == 8)
+
+
+
+```
+
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE, include=FALSE}
+
+# ---------------------------------------------
+# Stream gage - get data from selected gages
+# --------------------------------------------
+
+# Set up holder for all site info  
+sg <- data.frame()
+
+# Get monthly info from identified stream gages
+for (site in sites) {
+
+  file.next <- fread(sprintf("https://waterservices.usgs.gov/nwis/stat/?format=rdb&sites=%s&statReportType=monthly&statTypeCd=all&missingData=on", site), check.names = FALSE, header=TRUE)
+  head(file.next)
+
+  # Ignore no-data files, which start with #
+  if (file.next[1, 1] != "#") {
+      sg <- rbind(sg, file.next)
+  }
+}  
+
+```
+
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+
+# -------------------------
+# Stream gage - ID sites
+# -------------------------
+
+# Remove wacky lines: key is that the site# isn't really valid
+sg <- sg[sg$site_no %in% sites,]
+
+# Create date from year and month columns
+sg$date <- as.Date(with(sg, sprintf("%s-%02s-01", year_nu, month_nu)), "%Y-%m-%d")
+
+# Remove dates prior to 1984 and past Pekel data
+sg <- subset(sg, year_nu > 1983 & date < max(pk$date))
+
+# make sure values aren't characters
+sg$mean_va <- as.numeric(sg$mean_va)
+
+# get gage height info only
+sg <- subset(sg, parameter_cd == '00065')
+
+```
+Of the 10 gages that satisfy the location and temporal requirements, only 1 has gage height data. The correlation (kendall tau) of gage height data with Pekel surface water extent:
+
+```{r,echo=FALSE, warning=FALSE}
+
+# -------------------------
+# Stream gage and Pekel
+# -------------------------
+
+# Merge Pekel data and gage data
+pk_sg <- merge(pk, sg, by = "date")
+
+# Full data set
+cor_psg <- pk_sg %>% group_by(site_no) %>% summarize(cor=cor(water, mean_va, use = "complete.obs", method = "kendall"))
+cor_psg <- cor_psg[order(-cor_psg$cor),]
+
+cor_psg %>% kable() %>% kable_styling(bootstrap_options = "striped", full_width = FALSE)
+
+```
+Linear regression results:
+
+```{r,echo=FALSE}
+
+# Find best relationship
+
+# Take max correlation to get relationship coefficients
+
+fit <- lm(water ~ mean_va, data = pk_sg)
+summary(fit)
+
+```
+```{r, echo=FALSE, warning=FALSE}
+ggplot(pk_sg, aes(mean_va, water)) + 
+  geom_point() +
+  geom_smooth(method = "lm", se = FALSE, color = "red") +
+  theme_bw() +
+  xlab('Gage height (ft)') +
+  ylab(bquote('Pekel water extent ('~km^2*')'))
+
+```
+
+```{r, echo = FALSE}
+# assign coefficients from lm summary
+b <- summary(fit)$coefficients[1,1]
+m <- summary(fit)$coefficients[2,1]
+```
+
+Replace missing Pekel data water values with the equation
+
+$y = `r b` + `r m`x_i$  
+
+```{r, echo=FALSE}
+
+# Reserve the original for later
+
+# Replace values
+pk_sg$db <- 0
+pk_sg[which(is.na(pk_sg$water)), 'db'] <- NA
+pk_sg[which(is.na(pk_sg$water)), 'water'] <- pk_sg[which(is.na(pk_sg$water)), 'mean_va']*m + b
+
+
+
+
+```
+Normalize the values to zero mean and unit variance for comparison.
+```{r, echo=FALSE}
+
+mean_gage <- mean(pk_sg$mean_va)
+mean_pk <- mean(pk_sg$water)
+
+sd_gage <- sd(pk_sg$mean_va)
+sd_pk <- sd(pk_sg$water)
+
+pk_sg$norm_va <- (pk_sg$mean_va - mean_gage)/sd_gage
+pk_sg$norm_water <- (pk_sg$water - mean_pk)/sd_pk
+
+# Ensure that the values that were estimated are rolled back to NAs in the "original" database
+pk_sg.nas <- pk_sg
+pk_sg.nas[is.na(pk_sg.nas$db), 'norm_water'] <- NA
+pk_sg.nas[is.na(pk_sg.nas$db), 'water'] <- NA
+pk_sg.nas$db <- 'original'
+pk_sg$db <- "estimated"
+
+pk_sg.all <- rbind(pk_sg, pk_sg.nas)
+
+
+```
+
+
+
+```{r, warning=FALSE, echo=FALSE}
+
+p <- 
+  ggplot(pk_sg, aes(date, norm_va, color = as.factor(site_no))) + 
+ # geom_point() + 
+  geom_line(size = 0.8) +
+  scale_color_manual("Stream gage", values = c("steelblue2")) +
+  theme_bw() +
+  xlab("Date") +
+  ylab("Z score") +
+  geom_line(data=pk_sg.all, aes(date, norm_water, linetype = db), color = "black", size = 0.72) +
+  scale_shape_manual("Pekel", values = c(1, 16), labels = c("Estimated", "Original")) + 
+  scale_linetype_manual("Pekel", values = c("dotted", "solid"), labels = c("Estimated", "Original"))
+
+p
+
+
+```
+```{r, echo=FALSE, include=FALSE}
+
+cor_psg <- cor(pk_sg$water, pk_sg$mean_va, use = "complete.obs", method = "kendall")
+
+cor_psg %>% kable() %>% kable_styling(bootstrap_options = "striped", full_width = FALSE)
+```
+Basically, the two datasets align pretty well (correlation: `cor_psg`). An unexpected observation is that Pekel data overestimate some peaks. The explanation may be in part due to fact that the Pekel data are drawn from all stream reaches in the HUC, while the corresponding stream gage data are limited to one site. 

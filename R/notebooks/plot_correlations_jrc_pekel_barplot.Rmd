@@ -1,0 +1,35 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+```{r, echo = FALSE, warning=FALSE}
+
+
+x <- data.frame('Gage' = c('11450000', '11451000', '11451300', '11449500', '11451100', '11451715'), #, '11451800'),
+                'Pekel' = c(0.562, -0.252, -0.016, 0.800, 0.836, 0.808), #, NA),
+                'DSWE' = c(0.162, -0.195, -0.045, 0.360, 0.368, 0.377), #, NA),
+                'Type' = c('Stand Height', 'Lake Discharge', 'Lake Discharge', 'Stream Discharge', 'Stream Discharge', 'Stream Discharge')) #'Stream Discharge'))
+
+# Melt
+
+x_long <-  gather(x, gage_type, corr, Pekel:DSWE, factor_key = TRUE)
+
+# head(x_long)
+#       Gage             Type gage_type   corr
+# 1 11450000     Stand Height     Pekel  0.562
+# 2 11451000   Lake Discharge     Pekel -0.252
+# 3 11451300   Lake Discharge     Pekel -0.016
+# 4 11449500 Stream Discharge     Pekel  0.800
+# 5 11451100 Stream Discharge     Pekel  0.836
+# 6 11451715 Stream Discharge     Pekel  0.808
+
+ggplot(x_long, aes(Gage, corr, group = gage_type, fill = gage_type)) + 
+  geom_histogram(position = 'dodge', stat='identity') + 
+  theme_bw() +
+  labs(y = "Correlation") +
+  scale_fill_discrete(name = "Gage Type", labels = c("JRC", "DSWE"))
+
+ggsave()
+
+```

@@ -1,0 +1,856 @@
+---
+title: "Correlations of stream gage info with Pekel and DSWE 2.0 data in California's Central Valley"
+fontsize: 9
+output: html_notebook
+editor_options:
+  chunk_output_type: inline
+---
+
+
+####Workflow  
+For all 50 HUCs in the Central Valley:
+
+* Retrieve compiled Pekel data (JRC Global Surface Monthly Water History) 
+* Retrieve compiled DSWE v2.0 data (monthly composites) 
+* Clean data
+    + Restrict values to those from images with < 10% NoData pixels
+* Retrieve monthly stage height and discharge data from all CV stream gages (NWIS)
+* Calculate Pearson correlation between discharge and imagery area of water 
+    + In same HUCs
+    + In all HUCs
+
+
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+
+## ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+## correlation_gage ht_discharge_pekel_dswe_all_plots.Rmd
+## ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+# ---------------------------------------------------------------------- #
+# General setup ####
+# ---------------------------------------------------------------------- #
+
+# Load packages in a way that's easy for others to as well
+# Credit due: Simon at https://stackoverflow.com/questions/4090169/elegant-way-to-check-for-missing-packages-and-install-them
+
+loadPackages <- function(pkgs){
+  for (pkg in pkgs){
+    #  require returns TRUE invisibly if it was able to load package
+    if(!require(pkg, character.only = TRUE)){
+      #  If package was not able to load, re-install
+      install.packages(pkg, dependencies = TRUE)
+      #  Load package after installing
+      require(pkg, character.only = TRUE)
+    }
+  }
+}
+
+# Load packages
+loadPackages(c("dataRetrieval", "plyr", "tidyverse", 'data.table', 'knitr', 'kableExtra', 'devtools', 'googledrive'))
+
+# Load mapping packages
+loadPackages(c("ggmap", "sf", "maps", "mapdata", 'rgdal'))
+
+# Set default as echo FALSE
+knitr::opts_chunk$set(echo = FALSE)
+
+
+```
+
+```{r, echo=FALSE}
+
+# ---------------------------------------------------------------------- #
+#### Set no data threshold ####
+# ---------------------------------------------------------------------- #
+
+nodata_threshold <- 10
+
+```
+
+
+```{r}
+
+# ---------------------------------------------------------------------- #
+#### Set output file ####
+# ---------------------------------------------------------------------- #
+
+path.out <-  "D:/projects/place/"
+file.out <- paste0("CV_dswe_pekel_data_", nodata_threshold, "_pct_nodata.Rmd")
+
+```
+
+
+####Geographical Area
+```{r, echo = FALSE, message = FALSE, include= FALSE}
+
+# ---------------------------------------------------------------------- #
+#### Download HUC GIS data from Google Drive ####
+# ---------------------------------------------------------------------- #
+
+# HUCs
+filename <- 'WBDHU8_Central_Valley_UTMz10.shp'
+data_url = "1_2JnwZFS0blok23-9O7lw-o7Hk96E-nc" 
+download.file(sprintf("https://docs.google.com/uc?id=%s&export=download", data_url), destfile = "huc.zip", mode='wb')
+unzip(zipfile = 'huc.zip', exdir = "shp")
+file.remove('huc.zip')
+
+shp <- st_read(dsn = file.path("D:/projects/place/R/notebooks/shp", filename), stringsAsFactors = F)
+```
+
+```{r}
+
+# ---------------------------------------------------------------------- #
+#### Plot HUCs shapefile ####
+# ---------------------------------------------------------------------- #
+
+shp %>% 
+ggplot() + 
+  geom_sf(aes(fill = HUC8), show.legend = NA) +  # FALSE for no legend
+  theme_bw() +
+  coord_sf(crs = st_crs(26910)) # set UTM zone 10 projection
+
+# http://eriqande.github.io/rep-res-web/lectures/making-maps-with-R.html
+
+
+
+```
+
+
+```{r, echo=FALSE}
+
+# ---------------------------------------------------------------------- #
+# ------ Function - Process Pekel data ---------
+# ---------------------------------------------------------------------- #
+
+process_pekel <- function(df, nodata_cap) {
+  
+  df$date <- as.Date(df$date, format = "%Y-%m-%d")
+  
+# First row is nonsense  
+  df <- df[-1,]
+
+# X0 = no data, # X1 = not water # X2 = water
+  cols_to_keep <- c("date", "huc8", "X0", "X1", "X2")
+  df <- df[, cols_to_keep]
+  colnames(df) <- c("date", "huc8", "nodata", "notwater", "water")
+
+# Convert from pixels in m^2 to km^2: 900 m^2/pixel x 1e-06 km^2/m^2
+  df$water <- df$water * 0.0009  
+  df$notwater <- df$notwater * 0.0009  
+  df$nodata <- df$nodata * 0.0009  
+
+# Convert "water" --> NA in rows where nodata exceeds <threshold>% of the total
+  df$sum <- rowSums(df[, c("nodata", "notwater", "water")], na.rm = T)
+  df$pct <- df$nodata/df$sum * 100
+  df$water[df$pct > nodata_cap] <- NA
+
+return(df)
+}
+
+```
+
+
+```{r,echo=FALSE, message = FALSE, warning = FALSE}
+
+# ---------------------------------------------------------------------- #
+#### Get Pekel unbuffered data ####
+# ---------------------------------------------------------------------- #
+
+# Get Pekel monthly composites within all Central Valley HUCs
+# MyDrive/WORK/__PLACE/GEE_output/pekel_monthly_CV_HUC8s_Albers.csv
+
+data_url = "1neHmlcTseqKTlF5tRs38Ruawzua-hCtc"
+f.csv <- read.csv(sprintf("https://docs.google.com/uc?id=%s&export=download", data_url))
+pk <- process_pekel(f.csv, nodata_threshold)
+
+# Somehow date info goes awry
+pk$date <- as.Date(pk$date, format = "%Y-%m-%d")
+```
+
+
+```{r, echo=FALSE, message = FALSE, warning = FALSE}
+
+# ---------------------------------------------------------------------- #
+# #### Function - Process DSWE data ####
+# ---------------------------------------------------------------------- #
+
+process_dswe <- function(df, nodata_cap) {
+  
+# X0 = no data, # X1 = not water # X2 = water (high), X3 = water(low conf), X4 = wetland, X5 = water/wetand (low)
+  colnames(df) <- c("name", 'huc8', "notwater", "water", "water2", "water3", "water4", "nodata", "null", "sqkm")
+
+# Convert name to character
+  df <-  df %>% mutate_if(is.factor, as.character) 
+  
+# First row is useless
+  df <- df[-1,]
+  
+# Split name to extract date
+ #  df$name <- substr(df$name, 1, nchar(df$name) - 4)
+ #  df.split <- strsplit(df$name, "\\_")
+ #  df <- transform(df, year = sapply(df.split, "[[", 2), month = sapply(df.split, "[[", 3))
+  
+# Split name to extract date 
+  df$name <- gsub("[[:punct:]]", "", df$name)
+  df$name <- gsub("[a-zA-Z ]", "", df$name)
+  df$year <- substr(df$name, 1, 4)
+  df$month <- substr(df$name, 5, nchar(df$name))
+
+# Flip the order of the files from starting at the beginning of the year to the end (i.e, file 1 = Dec)
+  #df$inverted_month <- plyr::mapvalues(df$month, from = c(seq(1, 12)), to = c(seq(12, 1)))
+  #df$month <- df$inverted_month
+  #df$inverted_month <- NULL
+  
+# Convert to date
+  df$date <- as.Date(paste(df$year, df$month, "01", sep = "-"), format = "%Y-%m-%d")
+
+# Convert from  m^2 to km^2: 1m^2 = 1e-6 km^2
+  # df$notwater <- df$notwater * 0.000001  
+  # df$nodata <- df$nodata * 0.000001
+  # df$water <- df$water * 0.000001  
+  # df$water2 <- df$water2 * 0.000001  
+  # df$water3 <- df$water3 * 0.000001  
+  # df$water4 <- df$water4 * 0.000001 
+  
+  
+  # Convert from  pixels to km^2: 1 pixel = 900 m^2 = 0.0009 km^2
+  df$notwater <- df$notwater * 0.0009  
+  df$nodata <- df$nodata * 0.0009
+  df$water <- df$water * 0.0009 
+  df$water2 <- df$water2 * 0.0009  
+  df$water3 <- df$water3 * 0.0009 
+  df$water4 <- df$water4 * 0.0009 
+  df$null <- df$null * 0.0009
+  
+  
+# Convert "water" --> NA in rows where nodata > x% of the total
+# Leaving out 'null' b/c typically that's generated by a missing image
+  df$sum <- rowSums(df[, c("nodata", "notwater", "water", "water2", "water3", "water4")], na.rm = T)
+  df$pct <- df$nodata/df$sum * 100
+  df$water[df$pct > nodata_cap] <- NA
+  df$water2[df$pct > nodata_cap] <- NA
+  df$water3[df$pct > nodata_cap] <- NA
+  df$water4[df$pct > nodata_cap] <- NA
+  
+# clean up
+  df$name <- NULL
+  df$year <- NULL
+  df$month <- NULL
+  df$sqkm <- NULL
+  df$null <- NULL
+
+return(df)
+
+}
+
+```
+
+
+<!-- ```{r,echo=FALSE, message = FALSE, warning = FALSE} -->
+
+<!-- # ---------------------------------------------------------------------- # -->
+<!-- #### Get DSWE unbuffered data #### -->
+<!-- # ---------------------------------------------------------------------- # -->
+
+<!-- # Get DSWE monthly composites across entire HUC -->
+<!-- # my drive/WORK/__PLACE/data/dswe_v2_cv_huc_data_monthly_composites.csv -->
+<!-- # my drive/WORK/__PLACE/GEE_output/dswe_monthly_HUC_summaries_1984_2016.csv -->
+
+<!-- data_url = "1hBTBzBh-J-jzbTBYe-X0Tpj3uvNSxpjH" -->
+<!-- f.csv <- read.csv(sprintf("https://docs.google.com/uc?id=%s&export=download", data_url)) -->
+<!-- ds <- process_dswe(f.csv, nodata_threshold) -->
+
+<!-- ``` -->
+
+
+<!-- ```{r,echo=FALSE, message = FALSE, warning = FALSE} -->
+
+<!-- # ---------------------------------------------------------------------- # -->
+<!-- #### Merge Pekel and DSWE data #### -->
+<!-- # ---------------------------------------------------------------------- # -->
+
+<!-- # Add columns to Pekel data to match DSWE -->
+<!-- pk$water2 <- NA -->
+<!-- pk$water3 <- NA -->
+<!-- pk$water4 <- NA -->
+
+<!-- # Add ID tag to both  -->
+<!-- ds$type <-  'dswe' -->
+<!-- pk$type <- 'pekel' -->
+
+<!-- # Combine -->
+<!-- pk_ds <- rbind(pk, ds) -->
+
+<!-- ``` -->
+
+####Difference in proportion of contaminated pixels (DSWE, Pekel)
+
+Only values from images with less than **`r nodata_threshold`**% NoData pixels are used in correlations.
+
+
+Pekel and DSWE data show different proportions of NoData pixels (clouds, cloud shadows, or snow). In general, DSWE data have lower proportions of contaminated pixels.
+
+#####Boxplot
+
+```{r, echo = F, warning = FALSE}
+
+# ---------------------------------------------------------------------- #
+#### Plot boxplot of NoData proportions ####
+# ---------------------------------------------------------------------- #
+
+ggplot(pk_ds, aes(type, pct, color = type)) + 
+  geom_boxplot() +
+  theme_bw() +
+  theme(axis.title.x = element_blank()) + 
+  ylab("% NoData pixels") +
+  scale_color_discrete(name = "Dataset")
+```
+#####Scatterplot of average percent of NoData pixels (across all HUCs) by date
+
+  
+```{r, echo = FALSE, warning = FALSE}
+
+# ---------------------------------------------------------------------- #
+#### Scatterplot of NoData proportions over time ####
+# ---------------------------------------------------------------------- #
+
+pk_ds %>% 
+  group_by(type, date) %>% 
+  dplyr::summarize(mean = mean(pct, na.rm = T)) %>% 
+  ggplot(., aes(date, mean, group = type, color = type)) + 
+  geom_point() + 
+  theme_bw() +
+  xlab("Date") +
+  ylab("Mean % NoData pixels")
+
+```
+
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE, include=FALSE}
+
+# ---------------------------------------------------------------------- #
+#### Stream gage - read in gage info (not data) for CV HUCs ####
+# ---------------------------------------------------------------------- #
+
+# Narrow the list of desired gages based on the data available in each
+
+hucs_all <- c('18020002', '18020003','18020004', '18020005', '18020104', '18020111', '18020115',
+'18020116', '18020121', '18020122', '18020123', '18020125', '18020126', '18020128', '18020129', '18020151',
+'18020152', '18020153', '18020154', '18020155', '18020156', '18020157', '18020158', '18020159', '18020161',
+'18020162', '18020163', '18030001', '18030002', '18030003', '18030004', '18030005', '18030006', '18030007',
+'18030009', '18030010', '18030012', '18040001', '18040002','18040003', '18040006', '18040007',
+'18040008', '18040009', '18040010', '18040011', '18040012', '18040013', '18040014', '18040051')
+
+# Get general info about all gages in Central Valley HUCs from NWIS
+gage_info <- function(x) {
+  df <- fread(sprintf("https://waterservices.usgs.gov/nwis/site/?format=rdb&huc=%s&seriesCatalogOutput=true&siteStatus=all&hasDataTypeCd=dv,aw", x), check.names = FALSE, header=TRUE)
+}
+
+# Consolidate all files
+g <- do.call(rbind, lapply(hucs_all, gage_info))
+
+```
+
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+
+# ---------------------------------------------------------------------- #
+#### Stream gage - set criteria for gage selection ####
+# ---------------------------------------------------------------------- #
+
+# Format dates of data retrieval
+g$begin_date <- as.Date(g$begin_date, format = "%Y-%m-%d")
+g$end_date <- as.Date(g$end_date, format = "%Y-%m-%d")
+
+# Get gages that have an end date past 2010
+g.sub <- subset(g, end_date > "2010-01-01")
+
+# Calculate active time for each gage
+g.sub$time_active <- g.sub$end_date - g.sub$begin_date
+
+# site_no needs to be a number
+g.sub$site_no <- as.numeric(g.sub$site_no)
+
+# Get unique sites
+sites <- unique(g.sub$site_no)
+
+# Make sure site names have 8 characters; others aren't recognized in the automatic retrieval URL
+sites <- subset(sites, nchar(sites) == 8)
+
+# Make file with unique sites and corresponding HUC #
+site_info <- as.data.frame(g[, c('site_no', 'huc_cd')])
+site_info <- site_info[-1,]
+site_info <- unique(site_info[c("site_no", "huc_cd")])
+
+```
+
+
+
+```{r}
+
+# ---------------------------------------------------------------------- #
+#### Stream gage - create spatial file for plotting ####
+# ---------------------------------------------------------------------- #
+
+#site_pts
+
+```
+
+
+
+
+
+<!-- ```{r, echo=FALSE, warning=FALSE, message=FALSE, include=FALSE} -->
+
+<!-- # ---------------------------------------------------------------------- # -->
+<!-- #### Stream gage - get data from selected sites #### -->
+<!-- # ---------------------------------------------------------------------- # -->
+
+<!-- # Set up holder for all site info   -->
+<!-- sg <- data.frame() -->
+
+
+<!-- # Get monthly info from identified stream gages -->
+<!-- for (site in sites) { -->
+
+<!--   file.next <- fread(sprintf("https://waterservices.usgs.gov/nwis/stat/?format=rdb&sites=%s&statReportType=monthly&statTypeCd=all&missingData=on", site), check.names = FALSE, header=TRUE) -->
+
+<!--   # Ignore no-data files, which start with # -->
+<!--   if (file.next[1, 1] != "#") { -->
+<!--       sg <- rbind(sg, file.next) -->
+<!--   } -->
+<!-- }   -->
+
+<!-- # Save a copy -->
+<!-- sg.backup <- sg -->
+
+<!-- # Save a file -->
+<!-- #write.csv(sg, file = "d:/projects/place/data/tables/sg.csv", row.names = F) -->
+<!-- # https://drive.google.com/open?id=1GZv8M9dmT9vH8ccetZTHFI_KOXUbhp04 -->
+
+<!-- ``` -->
+
+
+<!-- ```{r, echo=FALSE, warning=FALSE, message=FALSE} -->
+
+<!-- # ---------------------------------------------------------------------- # -->
+<!-- #### Stream gage - process aggregated info #### -->
+<!-- # ---------------------------------------------------------------------- # -->
+
+<!-- # Data type values are defined here: https://waterservices.usgs.gov/rest/Site-Service.html#outputDataTypeCd -->
+<!-- # 00060 = discharge (cu ft/s) -->
+<!-- # 00065 = gage height (ft) -->
+
+<!-- # Remove invalid site #s -->
+<!-- sg <- sg[sg$site_no %in% sites, ] -->
+
+<!-- # Create date from year and month -->
+<!-- sg$date <- as.Date(with(sg, sprintf("%s-%02s-01", year_nu, month_nu)), "%Y-%m-%d") -->
+
+<!-- # Remove dates prior to 1984 and past Pekel data -->
+<!-- sg <- subset(sg, year_nu > 1983 & date < max(pk$date, na.rm = TRUE)) -->
+
+<!-- # Ensure values are characters -->
+<!-- sg$mean_va <- as.numeric(sg$mean_va) -->
+
+<!-- # Pare down datase--this requires sg as a data frame -->
+<!-- sg <- data.frame(sg) -->
+<!-- cols_to_keep <- c("site_no", "parameter_cd", "mean_va", "date") -->
+<!-- sg <- sg[, cols_to_keep] -->
+
+<!-- # Restrict to gage height or discharge info only -->
+<!-- sg <- subset(sg, parameter_cd == '00065' | parameter_cd == "00060") -->
+
+<!-- # Replace parameter info -->
+<!-- sg[sg$parameter_cd=="00060", "parameter_cd"] <- "discharge" -->
+<!-- sg[sg$parameter_cd=="00065", "parameter_cd"] <- "gage ht" -->
+
+<!-- # Attribute sites with HUC# -->
+<!-- sg <- merge(sg, site_info, by = "site_no") -->
+<!-- colnames(sg)[which(colnames(sg) == "huc_cd")] <- "huc8" -->
+
+<!-- # Remove gages in which  -->
+<!-- # - all values are the same -->
+<!-- # - gage values are negative -->
+<!-- sg <- sg %>%  -->
+<!--     group_by(site_no) %>% -->
+<!--     filter(length(unique(mean_va)) > 1) %>% -->
+<!--     filter(mean_va >= 0) -->
+
+<!-- # Assign factors -->
+<!-- sg$site_no <- as.factor(sg$site_no) -->
+<!-- sg$parameter_cd <- as.factor(sg$parameter_cd) -->
+<!-- sg$huc8 <- as.factor(sg$huc8) -->
+
+<!-- ``` -->
+
+
+<!-- ```{r, echo=FALSE, warning=FALSE, include=FALSE} -->
+
+<!-- # ---------------------------------------------------------------------- # -->
+<!-- # Calculate correlations between imagery and gages in same HUC #### -->
+<!-- # ---------------------------------------------------------------------- # -->
+
+<!-- # Merge Pekel/DSWE and gage data -->
+<!-- pk_ds_sg <- merge(pk_ds, sg, by = c("date", "huc8")) -->
+
+<!-- # Assign factors  -->
+<!-- pk_ds_sg <- pk_ds_sg %>% -->
+<!--       mutate(huc8 = factor(huc8), type = factor(type), site_no = factor(site_no),  -->
+<!--              parameter_cd = factor(parameter_cd)) -->
+
+<!-- # Correlations for reduced data set (i.e., missing water values are not yet interpolated) -->
+<!-- # dplyr explicitly called here b/c plyr doesn't play well with others -->
+<!-- cor_pdsg <- pk_ds_sg %>%  -->
+<!--   dplyr::group_by(huc8, site_no, type, parameter_cd) %>%  -->
+<!--   dplyr::summarize(cor=cor(water, mean_va, use = "pairwise.complete.obs", method = "pearson"), -->
+<!--             n = sum(!is.na(water)))  -->
+
+<!-- # Assign tag for whether imagery water data is interpolated (Y) or original (N) -->
+<!-- pk_ds_sg$interp <- ifelse(is.na(pk_ds_sg$water), 'Y', 'N') -->
+<!-- pk_ds_sg$interp <- as.factor(pk_ds_sg$interp) -->
+
+
+<!-- # Save a copy -->
+<!-- pk_ds_sg.backup <- pk_ds_sg -->
+<!-- ``` -->
+
+####Gage:imagery correlations in each HUC  
+
+The _highest_ Pearson correlations between monthly imagery data and monthly streamgage discharge/height data for each HUC are below. Bolded values are > 0.5.
+
+```{r, echo=FALSE}
+  
+# ---------------------------------------------------------------------- #
+# Display correlation table for Pekel and DSWE ####
+# ---------------------------------------------------------------------- #
+
+maxes <- cor_pdsg %>%
+    group_by(huc8) %>%
+    slice(which.max(cor))
+
+maxes %>%
+    kable(col.names = c("HUC", "Gage", "Data type", "Gage type", "r", "n"), digits = 3) %>%  
+    kable_styling("striped", full_width = FALSE) %>%
+    row_spec(c(which(maxes$cor > 0.5)), bold = T)
+```
+
+
+```{r, echo = FALSE}
+
+# ---------------------------------------------------------------------- #
+#### Get gage with max correlation in each HUC ####
+# ---------------------------------------------------------------------- #
+
+# Looks at gages within HUCs
+
+site_max <- maxes[order(-maxes$cor), ][1, "site_no"][[1]]
+site_min <- maxes[order(maxes$cor), ][1, "site_no"][[1]]
+
+cor_max <- maxes[order(-maxes$cor), ][1, "cor"][[1]]
+cor_min <- maxes[order(maxes$cor), ][1, "cor"][[1]]
+
+pk_max <-  maxes[order(-maxes$cor), ][1, "type"][[1]]
+pk_min <-  maxes[order(-maxes$cor), ][1, "type"][[1]]
+
+huc_max <- maxes[order(-maxes$cor), ][1, "huc8"][[1]]
+huc_min <- maxes[order(maxes$cor), ][1, "huc8"][[1]]
+
+sub_max <- subset(pk_ds_sg, site_no == site_max & type == pk_max)
+
+```
+####Gage:imagery correlation across all HUCs  
+
+Opening up the analysis to all gages, no matter what HUC they're in, reveals that the majority of imagery datasets have a stronger correlation with a gage that is outside that particular HUC (in red). 
+
+```{r, echo = FALSE, warning = FALSE}
+
+# ---------------------------------------------------------------------- #
+#### Get gage with max correlation in each HUC - ALL GAGES ####
+# ---------------------------------------------------------------------- #
+
+# Do super gages that correlate well across many different HUCs exist?
+# Get the correlations of each site with all HUCs, then look at which site correlates best for each HUC and data type (Pekel, DSWE)
+
+# Calculate max correlations for imagery given info from all possible gages (i.e., not HUC-specific gages)
+cor.all <-  sg %>% 
+  modify_at('huc8', ~NULL) %>%  # strip out the HUC column from the sg dataset. Only using HUC8 info from IMAGERY
+  left_join(pk_ds, by = c('date')) %>%  
+  group_by(site_no, huc8, type) %>% 
+  summarize(cor = cor(water, mean_va, use = "pairwise.complete.obs", method = "pearson")) %>% 
+  group_by(huc8) %>% 
+  slice(which.max(cor))
+
+# Join site info from the GAGES back in
+# Late Friday I can't figure out a better way to code this join:
+sg.slim <- sg %>% distinct(site_no, huc8)
+cor.all.sites <- left_join(cor.all, sg.slim, by = c('site_no'), copy = F) 
+
+# Make sure HUC info is just a number
+cor.all.sites$huc8.x <-  as.numeric(as.character(cor.all.sites$huc8.x))
+cor.all.sites$huc8.y <-  as.numeric(as.character(cor.all.sites$huc8.y))
+
+# Are the gage and imagery in the same HC?
+cor.all.sites$same_huc <- 'Y'
+cor.all.sites$same_huc[cor.all.sites$huc8.x != cor.all.sites$huc8.y] <- 'N'
+
+# Rearrange table a bit
+cor.all.sites <-  cor.all.sites[, c('huc8.x', 'site_no', 'huc8.y', 'type', 'cor', 'same_huc')]
+
+# Get the number of times each gage appears
+cor.all.sites <- cor.all.sites %>% group_by(site_no) %>% mutate(n = n())
+
+# Display table of correlations
+cor.all.sites %>% 
+  kable(col.names = c("HUC - imagery", "Gage w best correlation", "HUC - gage", "Data type", "r", 'Same HUC?', 'n'), digits = 3) %>%  
+  kable_styling("striped", full_width = FALSE) %>%
+  row_spec(c(which(cor.all.sites$cor > 0.5)), bold = T) %>% 
+  row_spec(c(which(cor.all.sites$same_huc=='N')), color = "red")
+
+cor.all.sites <- data.frame(cor.all.sites)
+
+
+  
+```
+
+The 'super gage' here is site `r as.character(cor.all.sites[which.max(cor.all.sites$n), 'site_no'])` in HUC `r as.character(cor.all.sites[which.max(cor.all.sites$n), 'huc8.y'])`
+
+
+
+
+
+####Super gage 
+```{r, echo = FALSE}
+
+# ---------------------------------------------------------------------- #
+#### Spatial plot of super gage correlations ####
+# ---------------------------------------------------------------------- #
+
+
+```
+
+
+####Correlations between DSWE water categories and gage discharge
+
+Gage discharge and "highest confidence" water extent generally have the highest correlations. 
+
+```{r, echo = FALSE, error = FALSE}
+
+# ---------------------------------------------------------------------- #
+#### Calculate correlations between gages and all DSWE classes ####
+# ---------------------------------------------------------------------- #
+
+# Correlations for data set before adding interpolated water values 
+# To sum water classes, we need to replace water2 and water3 NAs with 0, so that we can add them to water
+pk_ds_sg[c('water2', 'water3', 'water4')][is.na(pk_ds_sg[, c('water2', 'water3', 'water4')])] <- 0  #throws an error if no NA values
+
+# Sum water plus class 2 and class 3
+pk_ds_sg$waterplus2 <- rowSums(pk_ds_sg[, c('water', 'water2')]) 
+pk_ds_sg$waterplus23 <- rowSums(pk_ds_sg[, c('water', 'water2', 'water3')]) 
+pk_ds_sg$waterplus234 <- rowSums(pk_ds_sg[, c('water', 'water2', 'water3', 'water4')]) 
+
+# Calculate correlations
+cor_dsg <- pk_ds_sg %>% 
+  dplyr::filter(type == 'dswe') %>%
+  dplyr::group_by(huc8, site_no, type, parameter_cd) %>% 
+  dplyr::summarize(cor = cor(water, mean_va, use = "complete.obs", method = "pearson"),
+                   cor2 = cor(waterplus2, mean_va,use = "complete.obs", method = "pearson"),
+                   cor3 = cor(waterplus23, mean_va,use = "complete.obs", method = "pearson"),
+                   cor4 = cor(waterplus234, mean_va,use = "complete.obs", method = "pearson"),
+            n = sum(!is.na(water))) 
+
+# Display nicely
+cor_dsg <- cor_dsg %>%
+    group_by(huc8) %>% 
+    slice(which.max(cor)) 
+ 
+cor_dsg %>%  
+    kable(col.names = c("HUC", "Site", "Data type", "Gage type", "r (w1)", "r (w1+w2)", "r (w1+w2+w3)", "r (w1+w2+w3+w4)", "n"), digits = 3) %>%  
+    kable_styling("striped", full_width = FALSE) %>%
+    row_spec(c(which(cor_dsg$cor > 0.5)), bold = T)
+
+
+
+```
+
+
+```{r, echo=FALSE, message=FALSE, include=FALSE}
+
+# ---------------------------------------------------------------------- #
+#### Get coefficients for each correlation ####
+# ---------------------------------------------------------------------- #
+
+# Function to apply linear fit
+lm_fit <- function(f) {
+  print(head(f))
+  fit <- lm(water ~ mean_va, data = f)
+  results <- broom::tidy(fit)
+  f$b <- results$estimate[1]
+  f$m <- results$estimate[2]
+#  if (residuals(fit)[1][[1]] > 0 & nrow(f) > 3) {  # necessary to put this in to screen overfit lm's...sometimes
+    #   }
+  return(f)
+}
+
+
+# Calculate correlations; ignore hucs in which all imagery values are NA
+pk_ds_sg$b <- 0
+pk_ds_sg$m <- 0
+pk_ds_sg <- pk_ds_sg %>% 
+  group_by(huc8, site_no, type, parameter_cd) %>% 
+  filter(sum(is.na(water)) != length(water)) %>%
+  do(lm_fit(.))
+  
+
+```
+
+
+```{r, echo=FALSE}
+# ---------------------------------------------------------------------- #
+#### Replace NA imagery values with interpolated data ####
+# ---------------------------------------------------------------------- #
+
+pk_ds_sg$water <- ifelse(is.na(pk_ds_sg$water), pk_ds_sg$mean_va*pk_ds_sg$m + pk_ds_sg$b, pk_ds_sg$water)
+
+```
+
+
+####Individual correlations
+
+Highest correlation: HUC `r huc_max`, gage `r site_max` (r = `r format(cor_max, digits = 2)`)
+```{r, echo=FALSE, warning=FALSE}
+# ---------------------------------------------------------------------- #
+
+# ---------------------------------------------------------------------- #
+
+
+ggplot(subset(sub_max, interp == 'N'), aes(mean_va, water)) + 
+  geom_point() + #(aes(color= pk_type)) +
+  geom_smooth(method = "lm", color = "red", formula = y ~ x, size = 1) +
+  theme_bw() + 
+  xlab(bquote('Discharge ('~ft^3~s^-1*')')) +
+  ylab(bquote('Imagery water extent ('~km^2*')'))
+
+```
+####Pekel vs. DSWE correlations
+
+
+```{r, echo = F}
+
+# ---------------------------------------------------------------------- #
+#### Get Pekel/DSWE correlations ####
+# ---------------------------------------------------------------------- #
+
+pk.sub <- pk[, c('date', 'water', 'huc8')]
+colnames(pk.sub)[2] <- 'water_pk'
+
+ds.sub <- ds[, c('date', 'water', 'huc8')]
+colnames(ds.sub)[2] <- 'water_ds'
+
+pk_ds.sub <- merge(pk.sub, ds.sub, by = c('date', 'huc8'))
+
+# Calculate correlations
+cor_pkds <- pk_ds.sub %>% 
+  dplyr::group_by(huc8) %>% 
+  dplyr::summarize(cor = cor(water_pk, water_ds, use = "complete.obs", method = "kendall"), 
+            n_pekel = sum(!is.na(water_pk)),
+            n_dswe = sum(!is.na(water_ds))) # Used to look at correlation between data density and correlation
+
+cor_pkds %>%
+    kable(col.names = c("HUC", "r", 'n (Pekel)', 'n (DSWE)'), digits = 3) %>%  
+    kable_styling("striped", full_width = FALSE) %>%
+    row_spec(c(which(cor_pkds$cor > 0.5)), bold = T)
+
+
+
+```
+
+Is there any spatial pattern to the correlations?  
+
+
+####Pekel vs. DSWE correlations  
+
+Where do the two imagery datasets agree/disagree?
+```{r, echo = FALSE}
+
+# ---------------------------------------------------------------------- #
+#### Spatial plot of Pekel/DSWE correlations ####
+# ---------------------------------------------------------------------- #
+
+tmp <- merge(shp, cor_pkds, by.x = 'HUC8', by.y = 'huc8')
+
+ggplot(tmp) + 
+     geom_sf(aes(fill = cor)) +
+     theme_bw() +
+       scale_fill_gradient(limits = c(0,1), low = 'green', high = 'blue') +
+     coord_sf(crs = st_crs(26910)) # set UTM zone 10 projection
+```
+
+####DSWE vs. gage correlations  
+```{r}
+# ---------------------------------------------------------------------- #
+#### Spatial plot of DSWE/gage correlations ####
+# ---------------------------------------------------------------------- #
+
+# Get the max for each type (Pekel, DSWE) by HUC
+
+cor_ds_sg_max <- cor_pdsg %>%
+  filter(type == "dswe") %>% 
+  group_by(huc8) %>% 
+  slice(which.max(cor))
+
+  tmp2 <- merge(shp, cor_ds_sg_max, by.x = 'HUC8', by.y = 'huc8')
+
+ggplot(tmp2) + 
+     geom_sf(aes(fill = cor)) +
+     theme_bw() +
+  scale_fill_gradient(limits = c(0,1), low = 'green', high = 'blue') +
+     coord_sf(crs = st_crs(26910)) # set UTM zone 10 projection
+
+```
+
+####Pekel vs. gage correlations 
+```{r, echo = FALSE}
+
+# ---------------------------------------------------------------------- #
+#### Spatial plot of Pekel/gage correlations ####
+# ---------------------------------------------------------------------- #
+
+cor_pk_sg_max <- cor_pdsg %>%
+  filter(type == "pekel") %>% 
+  group_by(huc8) %>% 
+  slice(which.max(cor))
+
+  tmp <- merge(shp, cor_pk_sg_max, by.x = 'HUC8', by.y = 'huc8')
+
+ggplot(tmp) + 
+     geom_sf(aes(fill = cor)) +
+     theme_bw() +
+     coord_sf(crs = st_crs(26910)) # set UTM zone 10 projection
+
+
+```
+
+Where do the DSWE/Pekel correlations (imagery:gage) differ? 
+
+####Absolute differences between DSWE/gage and Pekel/gage r values
+```{r, echo = FALSE}
+
+# ---------------------------------------------------------------------- #
+#### Spatial plot of Pekel/gage : DSWE/gage correlation differences ####
+# ---------------------------------------------------------------------- #
+cor_diffs <- merge(cor_ds_sg_max, cor_pk_sg_max, by = c('huc8', 'parameter_cd'))
+
+cor_diffs$diff <- abs(cor_diffs$cor.x - cor_diffs$cor.y)
+
+tmp <- merge(shp, cor_diffs[, c('huc8', 'diff')], by.x = 'HUC8', by.y = 'huc8')
+
+ggplot(tmp) + 
+     geom_sf(aes(fill = diff)) +
+     theme_bw() +
+     coord_sf(crs = st_crs(26910)) # set UTM zone 10 projection
+```
+
+```
+

@@ -1,0 +1,107 @@
+---
+title: 
+output: html_notebook
+---
+### Exploration of Pekel/Washington data
+```{r, echo=FALSE, warning = FALSE}
+library(dplyr)  #filter
+library(Kendall)
+#path.in <- "D:/projects/floods/data"
+#file <- "Pekel_LCMAP_Washington_By_County_jjw.csv"
+```
+Access file hosted on Google drive through its URL
+```{r}
+data_url = "1O5a7d9RSnaPU0OsoXBS0YNR8xURy5e9W"
+df <- read.csv(sprintf("https://docs.google.com/uc?id=%s&export=download", data_url))
+```
+
+```{r, echo=FALSE}
+
+x <- df
+# Calculate Mann Kendall
+mk <- by(x$pct_water_in_dev, x$county, function(y) MannKendall(y))
+
+# Grab all p values
+p.vals <- sapply(mk, function(y) {as.numeric(y)[[2]]})
+
+# Transform to data frame
+p.vals.df <- stack(p.vals)
+
+# Significant ones only.
+p.threshold1 <- 0.005
+mk.sig <- p.vals.df %>%
+  filter(values < p.threshold1) 
+
+```
+Counties with significant (p < **`r p.threshold1`**) trends in 'percent water in developed' using Mann Kendall.
+```{r, echo=FALSE}
+
+x.sub <- x %>%
+  filter(county %in% mk.sig$ind)
+
+p <- ggplot(x.sub, aes(year, log10(pct_water_in_dev), group = county)) + geom_line(aes(color=county)) +
+  theme_bw()
+
+
+p
+```
+```{r, echo=FALSE}
+
+x <- df
+# Calculate Mann Kendall
+mk <- by(x$pct_devt_under_water, x$county, function(y) MannKendall(y))
+
+# Grab all p values
+p.vals <- sapply(mk, function(y) {as.numeric(y)[[2]]})
+
+# Transform to data frame
+p.vals.df <- stack(p.vals)
+
+# Significant ones only
+p.threshold2 <- 0.05
+mk.sig <- p.vals.df %>%
+  filter(values < p.threshold2) 
+
+```
+
+Counties with significant (p < **`r p.threshold2`**) trends in 'percent developed under water' using Mann Kendall.
+```{r, echo=FALSE}
+
+x.sub <- x %>%
+  filter(county %in% mk.sig$ind)
+
+p <- ggplot(x.sub, aes(year, log10(pct_devt_under_water), group = county)) + geom_line(aes(color=county)) +
+  theme_bw()
+
+p
+```
+
+
+
+```{r, echo=FALSE, include = FALSE}
+# sitesmap2.R
+# Map the sites data using the leaflet package.
+# This creates a prettier, interactive map.
+library(leaflet)
+library(maps)
+library(htmlwidgets) # To save the map as a web page.
+```
+
+```{r, echo=FALSE, include=FALSE, eval=FALSE}
+# The data to map.
+# State boundaries from the maps package. The fill option must be TRUE.
+bounds <- map('county', 'Washington', fill=TRUE, col= 'lightblue')
+
+# Get only the significant counties
+bounds2 <- lapply(bounds, function(y) {y[c(14,16, 24, 32, 34, 39)]})
+
+
+my.map <- leaflet(bounds) %>%
+  addTiles(urlTemplate = 
+             "http://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png") %>%
+  addMarkers(lng = -123.3040, lat= 47.7425, popup = "Jefferson")
+my.map
+
+#invisible(print(map))
+
+```

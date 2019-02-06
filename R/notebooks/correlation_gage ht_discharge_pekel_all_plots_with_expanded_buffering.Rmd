@@ -1,0 +1,364 @@
+---
+title: "Correlations of gage info with Pekel data with extended buffering"
+output: html_notebook
+fontsize: 9
+editor_options: 
+  chunk_output_type: inline
+---
+####*All gages in the 50 Central Valley HUCs are queried*
+
+####Workflow  
+* Retrieve previously compiled Pekel data (JRC Global Surface Monthly Water History) from all CV HUCs over 3 extents
+    + 'Unbuffered' - full HUC
+    + 'Buffered' - within 500m of stream extents only
+    + 'Buffered2' - from pre-identified, water-connected pixels that intersect waterways (2011 only)
+* Clean Pekel data
+    + Restrict values to those from images with < 5% NoData pixels
+* Retrieve stage height and discharge data from all CV stream gages (NWIS)
+* Calculate Pearson correlation between gage info and Pekel extents
+
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+
+rm(list=ls())
+
+library(dataRetrieval) # USGS data retrieval 
+library(ggplot2)
+library(tidyr) #lm calc
+library(dplyr) # slicing data
+library(data.table) #fread
+library(knitr) # format table
+library(kableExtra)  #format table
+```
+
+
+```{r, echo=FALSE}
+
+# ----------------------------------------------
+# ------ Function - Process Pekel data ---------
+# ----------------------------------------------
+
+process_pekel <- function(f) {
+  
+  f$date <- as.Date(f$date, format = "%Y-%m-%d")
+
+# X0 = no data, # X1 = not water # X2 = water
+  cols_to_keep <- c("date", "huc8", "X0", "X1", "X2")
+  f <- f[, cols_to_keep]
+  colnames(f) <- c("date", "huc8", "nodata", "notwater", "water")
+
+# Convert from  # of pixels to km^2: 900 m^2/pixel x 1e-06 km^2/m^2
+  f$water <- f$water * 0.0009  
+  f$notwater <- f$notwater * 0.0009  
+  f$nodata <- f$nodata * 0.0009  
+
+# Convert "water" --> NA in rows where nodata > 5% of the total
+  f$sum <- rowSums(f[, c("nodata", "notwater", "water")], na.rm = T)
+  f$pct <- f$nodata/f$sum * 100
+  f$water[f$pct > 5] <- NA
+
+return(f)
+}
+
+```
+
+```{r,echo=FALSE, message = FALSE, warning = FALSE}
+
+# --------------------------------
+# Get Pekel unbuffered data
+# ---------------------------------
+
+# Get Pekel monthly composites within all Central Valley HUCs
+# MyDrive/WORK/__PLACE/GEE_output/pekel_monthly_CV_HUC8s.csv
+
+data_url = "1JuFS2f1SLqqdDajgisU_BDnb_FLfSvU7"
+df <- read.csv(sprintf("https://docs.google.com/uc?id=%s&export=download", data_url))
+pk_u <- process_pekel(df)
+
+```
+
+
+```{r,echo=FALSE, message = FALSE, warning = FALSE}
+
+# ------------------------------
+# Get Pekel buffered data
+# ------------------------------
+
+# Get Pekel monthly composites within 500m of streams in CV hucs
+# my drive/WORK/__PLACE/GEE_output/pekel_monthly_CV_HUC8s_500m_streams.csv
+
+data_url = "1amcdHV9V3DXsS_fAgBMvX7E1WhZMyiKm"
+df <- read.csv(sprintf("https://docs.google.com/uc?id=%s&export=download", data_url))
+pk_b <- process_pekel(df)
+
+```
+
+
+```{r, echo = FALSE}
+# ---------------------------------------
+# Get Pekel buffered via connected pixels
+# ---------------------------------------
+
+# read in data produced from consolidate_special_buffers.R
+# MyDrive/WORK/__PLACE/data/pekel_contiguous_buffers_Feb_Nov_2011.csv
+
+data_url = "1ooOu8EFAoWiYDq3HlibYbIDttvZUbG82"
+df <- read.csv(sprintf("https://docs.google.com/uc?id=%s&export=download", data_url))
+df$date <- as.Date(df$date, format = "%m/%d/%Y") # had to convert the date here
+pk_bb <- process_pekel(df)
+
+
+```
+
+
+```{r, echo=FALSE}
+
+# Combine all Pekel sets
+
+pk_b$pk_type <- "buffered"
+pk_u$pk_type <- "unbuffered"
+pk_bb$pk_type <- "buffered2"
+
+pk <- rbind(pk_b, pk_u, pk_bb)
+
+# First row is nonsense
+pk <- pk[-1,]
+
+# Somehow date info goes awry
+pk$date <- as.Date(pk$date, format = "%Y-%m-%d")
+
+```
+
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE, include=FALSE}
+
+# -------------------------------------------------------
+# Stream gage - read in gage info (not data) for CV HUCs
+# -------------------------------------------------------
+
+# Narrow the list of desired gages based on the data available in each
+
+hucs_all <- c('18020002', '18020003','18020004', '18020005', '18020104', '18020111', '18020115',
+'18020116', '18020121', '18020122', '18020123', '18020125', '18020126', '18020128', '18020129', '18020151',
+'18020152', '18020153', '18020154', '18020155', '18020156', '18020157', '18020158', '18020159', '18020161',
+'18020162', '18020163', '18030001', '18030002', '18030003', '18030004', '18030005', '18030006', '18030007',
+'18030009', '18030010', '18030012', '18040001', '18040002','18040003', '18040006', '18040007',
+'18040008', '18040009', '18040010', '18040011', '18040012', '18040013', '18040014', '18040051')
+
+# Get general info about all gages in Central Valley HUCs from NWIS
+gage_info <- function(x) {
+  df <- fread(sprintf("https://waterservices.usgs.gov/nwis/site/?format=rdb&huc=%s&seriesCatalogOutput=true&siteStatus=all&hasDataTypeCd=dv,aw", x), check.names = FALSE, header=TRUE)
+}
+
+# Consolidate all files
+g <- do.call(rbind, lapply(hucs_all, gage_info))
+
+```
+
+
+```{r, echo=FALSE, warning=FALSE,message=FALSE}
+
+# ------------------------------------------------
+# Stream gage - set criteria for gage selection
+# ------------------------------------------------
+
+# Format dates of data retrieval
+g$begin_date <- as.Date(g$begin_date, format = "%Y-%m-%d")
+g$end_date <- as.Date(g$end_date, format = "%Y-%m-%d")
+
+# Get gages that have an end date past 2010
+g.sub <- subset(g, end_date > "2010-01-01")
+
+# Calculate active time for each gage
+g.sub$time_active <- g.sub$end_date - g.sub$begin_date
+
+# site_no needs to be a number
+g.sub$site_no <- as.numeric(g.sub$site_no)
+
+# Get unique sites
+sites <- unique(g.sub$site_no)
+
+# Make sure site names have 8 characters; others aren't recognized in the automatic retrieval URL
+sites <- subset(sites, nchar(sites) == 8)
+
+# Make a file with unique sites and corresponding HUC #
+site_info <- as.data.frame(g[, c('site_no', 'huc_cd')])
+site_info <- site_info[-1,]
+site_info <- unique(site_info[c("site_no", "huc_cd")])
+
+```
+
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE, include=FALSE}
+
+# ---------------------------------------------
+# Stream gage - get data from selected sites
+# --------------------------------------------
+
+# Set up holder for all site info  
+sg <- data.frame()
+
+# Get monthly info from identified stream gages
+for (site in sites) {
+
+  file.next <- fread(sprintf("https://waterservices.usgs.gov/nwis/stat/?format=rdb&sites=%s&statReportType=monthly&statTypeCd=all&missingData=on", site), check.names = FALSE, header=TRUE)
+
+  # Ignore no-data files, which start with #
+  if (file.next[1, 1] != "#") {
+      sg <- rbind(sg, file.next)
+  }
+}  
+
+# Save a copy
+sg.orig <- sg
+
+
+
+```
+
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+
+# ---------------------------------------
+# Stream gage - process aggregated info
+# ---------------------------------------
+
+# Data type values are defined here: https://waterservices.usgs.gov/rest/Site-Service.html#outputDataTypeCd
+# 00060 = discharge (cu ft/s)
+# 00065 = gage height (ft)
+
+# Remove sites in which the site# isn't valid
+sg <- sg[sg$site_no %in% sites,]
+
+# Create date from year and month columns
+sg$date <- as.Date(with(sg, sprintf("%s-%02s-01", year_nu, month_nu)), "%Y-%m-%d")
+
+# Remove dates prior to 1984 and past Pekel data
+sg <- subset(sg, year_nu > 1983 & date < max(pk$date, na.rm = TRUE))
+
+# Make sure values aren't characters
+sg$mean_va <- as.numeric(sg$mean_va)
+
+# Pare down dataset. This requires sg as a data frame
+sg <- data.frame(sg)
+cols_to_keep <- c("site_no", "parameter_cd", "mean_va", "date")
+sg <- sg[, cols_to_keep]
+
+# Restrict to gage height or discharge info only
+sg <- subset(sg, parameter_cd == '00065' | parameter_cd == "00060")
+
+# Replace parameter info
+sg[sg$parameter_cd=="00060", "parameter_cd"] <- "discharge"
+sg[sg$parameter_cd=="00065", "parameter_cd"] <- "gage ht"
+
+# Attribute sites with HUC#
+sg <- merge(sg, site_info, by = "site_no")
+colnames(sg)[which(colnames(sg) == "huc_cd")] <- "huc8"
+
+# Remove gages in which 
+# - all values are the same
+# - gage values are negative
+# Assign factors
+
+sg <- sg %>% 
+    group_by(site_no) %>%
+    filter(length(unique(mean_va)) > 1) %>%
+    filter(mean_va >= 0, )
+  #  mutate(huc8 = factor(huc8), parameter_cd = factor(parameter_cd)) #this didn't work..!
+
+# Assign factors
+sg$site_no <- as.factor(sg$site_no)
+sg$parameter_cd <- as.factor(sg$parameter_cd)
+sg$huc8 <- as.factor(sg$huc8)
+
+```
+
+
+```{r, echo=FALSE, warning=FALSE, include=FALSE}
+
+# -----------------------------------------------
+# Calculate correlations between gages and Pekel
+# -----------------------------------------------
+
+
+# Merge Pekel data and gage data
+pk_sg <- merge(pk, sg, by = c("date", "huc8"))
+
+
+# The super buffered areas are only for 2011, so trim the whole set down to that date range
+
+pk_sg <- subset(pk_sg, date > '2010-12-01' & date < '2012-01-01')
+
+# Assign factors 
+pk_sg <- pk_sg %>%
+      mutate(huc8 = factor(huc8), pk_type = factor(pk_type), site_no = factor(site_no), 
+             parameter_cd = factor(parameter_cd))
+
+# Correlations for full data set
+cor_psg <- pk_sg %>% 
+  group_by(huc8, site_no, pk_type, parameter_cd) %>% 
+  summarize(cor=cor(water, mean_va, use = "pairwise.complete.obs", method = "pearson"),
+            n = sum(!is.na(water))) # Used to look at correlation between data density and correlation
+
+# Assign tag for whether Pekel water data is interpolated or original
+pk_sg$interp <- ifelse(is.na(pk_sg$water), 'Y', 'N')
+pk_sg$interp <- as.factor(pk_sg$interp)
+
+```
+
+
+The Pearson correlations between monthly Pekel data and monthly streamgage discharge/height data for each HUC are below. Bolded values are > 0.5.
+
+####Correlations in each HUC
+
+
+```{r, echo=FALSE}
+  
+# -------------------------------------------
+# Get gage with max correlation in each HUC
+# -------------------------------------------
+
+maxes <- cor_psg %>%
+    group_by(huc8)# %>%
+ #   slice(which.max(cor))
+#
+maxes %>%
+    kable(col.names = c("HUC", "Gage", "Pekel data", "Parameter", "r", "n")) %>%  
+    kable_styling("striped", full_width = FALSE) %>%
+    row_spec(c(which(maxes$cor > 0.5)), bold = T)
+
+```
+
+
+```{r, echo=FALSE, message=FALSE, include=FALSE}
+
+# --------------------------------------
+# Get coefficients for each correlation
+# -------------------------------------
+
+# Function to apply linear fit
+lm_fit <- function(f) {
+  fit <- lm(water ~ mean_va, data = f)
+  #print(dim(coef(summary(fit))))
+  #print(nrow(f))
+  if (residuals(fit)[1][[1]] > 0 & nrow(f) > 3) {  # necessary to put this in to screen overfit lm's
+    f$b <- summary(fit)$coefficients[1,1]
+    f$m <- summary(fit)$coefficients[2,1]
+    }
+  return(f)
+}
+
+
+# Calculate correlations for full data set
+# Ignore hucs in which all Pekel values are NA
+pk_sg$b <- 0
+pk_sg$m <- 0
+#pk_sg <- pk_sg %>% 
+#  group_by(huc8, site_no, pk_type, parameter_cd) %>% 
+#  filter(sum(is.na(water)) != length(water)) %>%
+#  filter(!is.na(pct)) %>%
+#  do(lm_fit(.))
+
+
+```
+

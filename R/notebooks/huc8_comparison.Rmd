@@ -6,115 +6,111 @@ editor_options:
   chunk_output_type: inline
 ---
 
-```{r setup, echo = FALSE}
+```{r setup, echo = FALSE, include=FALSE}
 library(ggplot2)
+library(reshape2) # for reshaping data format
+library(dplyr) # for correlations by factor
+library(knitr) # for formatting tables, BUT doensn't seem to work unless knitting
 ```
 ### Overview
-This document describes leveraging the correlation between stream gage discharge data (ft<sup>3</sup>/s) and Pekel monthly surface water data in order to fill gaps in the Pekel data record due to clouds.
+This document describes leveraging the correlation between monthly stream gage discharge data (ft<sup>3</sup>/s) and Pekel monthly surface water data in order to fill gaps in the Pekel data record.
 
-Stream gage information is from HUC8 18040008 Upper Merced (https://waterdata.usgs.gov/nwis/). Volume streamflow discharge data from all gages with complete records from 2006 through 2015 (3 of 22 listed gages) were output to individual *.csv files. The files were merged with Pekel data. The consolidated file is accessed on Google drive through its URL:
+Stream gage information is from **HUC8 18040008 Upper Merced** (https://waterdata.usgs.gov/nwis/). Volume streamflow discharge data from all gages with complete records from 2006 through 2015 (3 of 22 listed gages) were output to individual *.csv files and merged with Pekel data. The consolidated file is accessed on Google drive through its URL:
 ```{r, warning=FALSE}
-data_url = "1t6XaZANrVRMShni8Xo_0Ok7esSM2vqBt"
-x <- read.csv(sprintf("https://docs.google.com/uc?id=%s&export=download", data_url))
+data_url = "1M6P5RJqgTxdazxjJMakKU6qdrBeLwvYr" #1t6XaZANrVRMShni8Xo_0Ok7esSM2vqBt"
+df <- read.csv(sprintf("https://docs.google.com/uc?id=%s&export=download", data_url))
 ```
-  
 
-Header of consolidated data file:
-```{r, echo=FALSE, warning=FALSE}
+
+```{r, echo=FALSE, warning=FALSE, include=FALSE}
+# Get rid of extraneous columns before reshaping
+x <- df
 x$date <- as.Date(with(x, sprintf("%d-%02d-01", year, month)), "%Y-%m-%d")
-x$fileName <- NULL # file info is not necessary
-x_original <- x
-head(x)
+cols_to_keep <- c("date", "water", "sg_11264500", "sg_11266500", "sg_11270900")
+x <- x[, cols_to_keep]
+
 ```   
 <br>
-The raw Pekel data for this HUC include multiple NA values:
+
+```{r, echo=FALSE}
+# Lag Pekel water data by 1 month
+x <- x %>% mutate(lag.water = dplyr::lead(water, n=1, default = NA))
+
+# Reformat data to long format for plotting. First reshape the gage data--
+x.long <- melt(x, id.vars = c("water", "date", "lag.water"), variable.name = "gage", value.name = "discharge")
+
+# Then the pekel data -- obsolete since we took out everything but Pekel water data
+#x.long <- melt(x.long, id.vars = c("date", "gage", "discharge", "lag.value"), variable.name = "pekel")
+
+```
+Plotting individual stream gage data together with Pekel data yields the following.  Pekel data are in areal units, but have been scaled for display purposes.
 
 ```{r, warning=FALSE, echo=FALSE}
-ggplot(x_original, aes(date, water)) + 
-  geom_line() + 
-  geom_point() +     
+ggplot(x.long, aes(date, discharge, group = gage, color = gage)) + 
+  geom_point() + 
+  geom_line() +
   theme_bw() +
   xlab("Date") +
-  ylab('Pekel monthly water')
+  ylab(bquote('Discharge ('~ft^3~s^-1*')')) +
+  scale_color_discrete(name = "Stream gage", labels = c("11264500", "11266500", "11270900")) +
+  
+  # Force Pekel legend to appear by including a manufactured category in aes (here, gage[1])
+  geom_line(data=x.long, aes(date, water*1000000, linetype = gage[1]), color = "black", size = 1.3) +
+  scale_linetype_manual(name = "Pekel", values = ("solid"), labels = ("Water extent"))
 
 ```
-
-
-### Individual site correlations  
-Correlations between discharge volumes and Pekel monthly water vary among the 3 examined HUCs.  
+Pekel peak values appear to slightly lag stream gage peaks, so summarize correlations by non-lagged and 1-month lagged dates.
 <br>
+Non-lagged correlations
+```{r, echo=FALSE, warning=FALSE}
 
-#### **SG 11264500 Happy Isles Bridge, Yosemite**
-**Pekel water vs. stream gage correlation**  
+# Calculate non-lagged correlation
+cor.nonlagged <- x.long %>%
+ # filter(pekel == "water") %>%  
+  group_by(gage) %>%
+  summarize(COR = cor(discharge, water, use = "complete.obs"))
+kable(cor.nonlagged, caption = "Non-lagged correlations")
+```
+1-month lagged correlations
+```{r, echo=FALSE, warning=FALSE}
+# Calculate lagged correlation
+cor.lagged <- x.long %>%
+  group_by(gage) %>%
+  summarize(COR = cor(discharge, lag.water, use = "complete.obs"))
+kable(cor.lagged, caption = "1-month lagged correlations")
+```
+
+```{r, echo = FALSE, warning = FALSE}
+p <- ggplot(x, aes(sg_11270900, lag.water)) + 
+     geom_point() + 
+     theme_bw() +
+     xlab(bquote('Stream gage discharge ('~ft^3~s^-1*')')) +
+     ylab('Pekel monthly water') +
+     geom_smooth(method = "lm", se = FALSE, color = "red")
+p
+```
+The best correlation (sg_11270900) is relatively linear until ~2900 ft<sup>3</sup>/s. Restricting the stream gage data range to that value yields a higher correlation:
 
 ```{r, echo=FALSE}
-cor(x$sg_11264500, x$water, use = "complete.obs")
-
-```
-```{r, echo = FALSE, warning = FALSE}
-ggplot(x, aes(sg_11264500, water)) + 
-  geom_point() + 
-  theme_bw() +
-  xlab(bquote('Stream gage discharge (' ~ft^3~s^-1*')')) +
-  ylab('Pekel monthly water') +
-  geom_smooth(method = "lm", se = FALSE, color = "red")
-```
-
-<br>  
-
-#### **SG 11266500 Pohono Bridge, Yosemite**
-**Pekel water vs. stream gage correlation**  
-```{r, echo=FALSE}
-cor(x$sg_11266500, x$water, use = "complete.obs")
-```
-```{r, echo = FALSE, warning = FALSE}
-ggplot(x, aes(sg_11266500, water)) + 
-  geom_point() + 
-  theme_bw() +
-  xlab(bquote('Stream gage discharge ('~ft^3~s^-1*')')) +
-  ylab('Pekel monthly water') +
-  geom_smooth(method = "lm", se = FALSE, color = "red")
-```
-<br>
-
-#### **SG 11270900 Merced Falls Dam, Snell**
-**Pekel water vs. stream gage correlation**  
-```{r, echo=FALSE, eval=TRUE}
-cor(x$sg_11270900, x$water, use = "complete.obs")
+max.discharge <- 2900
+x.sub <- subset(x, sg_11270900 <= max.discharge)
+cor(x.sub$sg_11270900, x.sub$lag.water, use = "complete.obs")
 ```
 
 ```{r, echo = FALSE, warning = FALSE}
-ggplot(x, aes(sg_11270900, water)) + 
+ggplot(x.sub, aes(sg_11270900, lag.water)) + 
   geom_point() + 
   theme_bw() +
   xlab(bquote('Stream gage discharge ('~ft^3~s^-1*')')) +
   ylab('Pekel monthly water') +
   geom_smooth(method = "lm", se = FALSE, color = "red")
 ```
-This correlation is relatively linear until ~2800 ft<sup>3</sup>/s. The maximum stream gage discharge amount for the months with no Pekel data is lower than that threshold:
-```{r}
-max_pekel <- max(x[which(is.na(x$water)), "sg_11270900"])
-print(max_pekel)
-```
-Restricting the stream gage data range to that amount + additional value (200 ft<sup>3</sup>/s) yields a higher correlation:
-
+Calculate the linear equation of the fit
 ```{r, echo=FALSE}
-x.sub <- subset(x, sg_11270900 <= max_pekel + 200)
-cor(x.sub$sg_11270900, x.sub$water, use = "complete.obs")
-```
-```{r, echo = FALSE, warning = FALSE}
-ggplot(x.sub, aes(sg_11270900, water)) + 
-  geom_point() + 
-  theme_bw() +
-  xlab(bquote('Stream gage discharge ('~ft^3~s^-1*')')) +
-  ylab('Pekel monthly water') +
-  geom_smooth(method = "lm", se = FALSE, color = "red")
-```
-If we calculate the linear equation of the fit
-```{r, echo=FALSE}
-fit <- lm(water~sg_11270900, data = x.sub)
+fit <- lm(lag.water ~ sg_11270900, data = x.sub)
 summary(fit)
 ```
+
 ```{r, echo = FALSE}
 # assign coefficients from lm summary
 b <- summary(fit)$coefficients[1,1]
@@ -126,27 +122,46 @@ and replace missing Pekel data water values with the resulting equation
 $y = `r b` + `r m`x_i$
 
 ```{r, echo = FALSE}
-x[which(is.na(x$water)), 'water'] <- x[which(is.na(x$water)), 'sg_11270900']*m + b
+# Get rid of all other gages
+
+x.long <- subset(x.long, gage == 'sg_11270900')
+
+# save a df as original data
+
+x.original <- x.long
+
+
+x.long[which(is.na(x.long$lag.water)), 'lag.water'] <- x.long[which(is.na(x.long$lag.water)), 'discharge']*m + b
+
+# That established the values according to the lagged correlation.  Now unlag for plotting
+# purposes.
+x.long <-
+ x.long %>% 
+  mutate(water = dplyr::lag(lag.water, n=1, default = NA))
+
+x.original$db <- "original"
+x.long$db <- "estimated"
+
+x.combined <- rbind(x.original, x.long)
+
 ```
 
-where x = stream gage value, the resulting plot shows how the estimated data fills gaps in the Pekel record:
-
+where x = stream gage value. The resulting plot shows how the estimated data fill gaps in the Pekel record:
 
 ```{r, warning=FALSE, echo=FALSE}
-# Add a tag that distinguishes estimated from original data
-x$db  <- 'Estimated data'
-x_original$db <- "Original data" 
 
-# Combine estimated and original data for plotting purposes
-x_combined = rbind(x_original, x)
-
-ggplot(x_combined, aes(date, water, group = db)) + 
-  geom_line(aes(color = db, size = db)) + 
-  geom_point(data=x[which(is.na(x_original$water)), ], aes(x=date, y=water), color = 'red') +     
-  geom_point(data=x[which(!is.na(x_original$water)), ], aes(x=date, y=water), color = 'black') +
-  scale_size_manual("Dataset", values = c(0.3, 0.8), labels = c("Estimated data", "Original data")) + 
-  scale_color_manual("Dataset", values = c("red", "black"), labels = c("Estimated data", "Original data")) + 
+p <- 
+  ggplot(subset(x.combined, gage == "sg_11270900"), aes(date, discharge, color = gage)) + 
+  geom_point() + 
+  geom_line(size = 0.6) +
+  scale_color_manual("Stream gage", values = c("steelblue2")) +
   theme_bw() +
   xlab("Date") +
-  ylab('Pekel monthly water')
+  ylab(bquote('Discharge ('~ft^3~s^-1*')')) +
+  #geom_point(data=x.combined, aes(date, water*1000000, shape = db), size = 1.0, color = "black") +
+  geom_line(data=x.combined, aes(date, water*1000000, linetype = db), size = 0.9, color = "black") +
+  scale_shape_manual("Pekel", values = c(1, 16), labels = c("Estimated", "Original")) + 
+  scale_linetype_manual("Pekel", values = c("dotted", "solid"), labels = c("Estimated", "Original"))
+p
+
 ```

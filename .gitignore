@@ -1,0 +1,12 @@
+.Rproj.user
+.Rhistory
+.RData
+.Ruserdata
+data/
+docs/
+gis/
+output/
+graphics/
+R/shp
+place.Rproj
+README.md

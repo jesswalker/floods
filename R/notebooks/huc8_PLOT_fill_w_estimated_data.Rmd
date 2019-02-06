@@ -1,0 +1,83 @@
+---
+title: "Plot examples"
+output: html_notebook
+fontsize: 9
+editor_options: 
+  chunk_output_type: inline
+---
+
+```{r setup, echo = FALSE}
+library(ggplot2)
+```
+### Overview  
+
+* **Manually add a legend**
+* **Combine 2 separate datasets**
+ 
+##### _Data background_
+
+Read in streamflow discharge data merged with Pekel data. The consolidated file is accessed on Google drive through its URL.
+```{r, warning=FALSE, echo=FALSE}
+data_url = "1t6XaZANrVRMShni8Xo_0Ok7esSM2vqBt"
+x <- read.csv(sprintf("https://docs.google.com/uc?id=%s&export=download", data_url))
+x$date <- as.Date(with(x, sprintf("%d-%02d-01", year, month)), "%Y-%m-%d")
+x.original <- x
+```   
+**Force plot to have a legend**
+
+```{r, warning=FALSE, echo=TRUE}
+# Aes needs a category to form a legend
+# could just have easily taken a random factor from another unrelated but categorical column, i.e.
+#  geom_line(data=x.long, aes(date, water*1000000, linetype = gage[1]), color = "black", size = 1.3) +
+# where gage[1] grabs the first instance of a factor
+ 
+x.original$db <- "Original data" 
+ggplot(x.original, aes(date, water, color=db)) + 
+  geom_line(aes(color = db)) + 
+  geom_point(aes(color = db)) +     
+  theme_bw() +
+  xlab("Date") +
+  scale_color_manual("Dataset", values = c("black"), labels = c("Original data")) + 
+  ylab('Pekel monthly water') 
+
+```
+
+```{r, echo=FALSE}
+#Subset data, get a new correlation, and calculate linear fit
+
+x.sub <- subset(x, sg_11270900 <= 3000)
+fit <- lm(water~sg_11270900, data = x.sub)
+
+# assign coefficients from lm summary
+b <- summary(fit)$coefficients[1,1]
+m <- summary(fit)$coefficients[2,1]
+```
+
+After replacing missing Pekel data with the linear equation
+
+$y = `r b` + `r m`x_i$
+
+```{r, echo = FALSE}
+x[which(is.na(x$water)), 'water'] <- x[which(is.na(x$water)), 'sg_11270900']*m + b
+```
+
+**Show the estimated data replacing NAs in the original data**
+
+
+```{r, warning=FALSE, echo=TRUE}
+# Distinguish estimated from original data
+x$db  <- 'Estimated data'
+
+# Combine estimated and original data for plotting purposes
+x_combined = rbind(x.original, x)
+
+ggplot(x_combined, aes(date, water, group = db)) + 
+  geom_line(aes(color = db, size = db)) + 
+  geom_point(data=x[which(is.na(x.original$water)), ], aes(x=date, y=water), color = 'red') +     
+  geom_point(data=x[which(!is.na(x.original$water)), ], aes(x=date, y=water), color = 'black') +
+  scale_size_manual("Dataset", values = c(0.3, 0.8), labels = c("Estimated data", "Original data")) + 
+  scale_color_manual("Dataset", values = c("red", "black"), labels = c("Estimated data", "Original data")) + 
+  theme_bw() +
+  xlab("Date") +
+  ylab('Pekel monthly water')
+```
