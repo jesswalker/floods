@@ -71,6 +71,8 @@ nodata_threshold <- 10
 #### Set files and folders ####
 # ---------------------------------------------------------------------- #
 
+#plots are saved to path.out/plots
+
 path.out <-  "D:/projects/place/R"
 
 shp.dir <- file.path(path.out, "shp")
@@ -92,7 +94,7 @@ load(file.in)
 
 ####Background
 
-  - Script **process_gage_discharge_pekel_dswe2_correlations_by_CV_huc.Rmd** must be run prior to this
+  - Script **process_gage_discharge_pekel_dswe2_correlations_by_CV_huc.Rmd** must be run prior to this script
   - File of JRC (Pekel), DSWE, and stream gage monthly values is retrieved
 
   
@@ -130,7 +132,7 @@ Prior to applying that standard, Pekel and DSWE data show different proportions 
 
 Pekel and DSWE data show different proportions of NoData pixels (clouds, cloud shadows, or snow). In general, DSWE data have lower proportions of contaminated pixels.
 
-A seasonal breakdown shows that DSWE winter and fall images tend to have more "workable" data than Pekel images. The quality of that data is not established. 
+A seasonal breakdown shows that DSWE winter and fall images tend to have more "workable" data than Pekel images. The quality of that data may be substandard, however. 
 
 ```{r, echo = F, warning = FALSE}
 
@@ -152,10 +154,7 @@ ggplot(pk_ds_season, aes(season, pct, color = type)) +
   scale_color_discrete(name = "Dataset")
 ```
 
-####Average percent of NoData pixels (across all HUCs) by date
 
-
-  
 ```{r, echo = FALSE, warning = FALSE, include=FALSE}
 
 # ---------------------------------------------------------------------- #
@@ -177,30 +176,61 @@ ggplot(pk_ds_season, aes(season, pct, color = type)) +
 
 ####Gage:imagery correlations in each HUC  
 
-The _highest_ Pearson correlations between monthly imagery data and monthly streamgage discharge/height data for each HUC are below. Bolded values are > 0.5.
+The _highest_ Pearson correlations between monthly imagery data and monthly streamgage discharge/height data for each respective imagery set in each HUC are below. Bolded values are > 0.5.
 
-```{r, echo=FALSE}
+```{r, echo=FALSE, warning=FALSE, message = FALSE}
   
 # ---------------------------------------------------------------------- #
 # Display correlation table for Pekel and DSWE ####
 # ---------------------------------------------------------------------- #
 
 maxes <- cor_pdsg %>%
-    group_by(huc8) %>%
+    group_by(huc8, type) %>%
     slice(which.max(cor))
 
 maxes %>%
     kable(col.names = c("HUC", "Gage", "Data type", "Gage type", "r", "# months of data"), digits = 3) %>%  
     kable_styling("striped", full_width = FALSE) %>%
-    row_spec(c(which(maxes$cor > 0.5)), bold = T)
+    row_spec(c(which(maxes$cor > 0.5)), bold = T) 
 ```
 ```{r, echo = FALSE}
 
 # ---------------------------------------------------------------------- #
-#### Spatial plot of # months available for each 'best' correlations ####
+#### Spatial plot of whether DSWE or Pekel has a higher correlation ####
 # ---------------------------------------------------------------------- #
 
-tmp <- merge(shp, maxes.df, by.x = 'HUC8', by.y = 'huc8')
+
+maxes.by.type <- cor_pdsg %>%
+    group_by(huc8) %>%
+    slice(which.max(cor))
+
+tmp <- merge(shp, maxes.by.type, by.x = 'HUC8', by.y = 'huc8')
+
+p <- ggplot(tmp) + 
+     geom_sf(aes(fill = type)) +
+     theme_bw() +
+       scale_fill_manual(name = "Imagery with higher correlation", values= c('orange', 'lightblue'), labels = c('DSWE', "JRC/Pekel")) +
+     coord_sf(crs = st_crs(26910)) # set UTM zone 10 projection
+p
+
+
+
+```
+
+
+```{r, echo = FALSE, warning = FALSE, message = FALSE }
+
+
+# ---------------------------------------------------------------------- #
+#### Spatial plot of # months available for each 'best' correlation ####
+# ---------------------------------------------------------------------- #
+
+
+maxes.by.type <- cor_pdsg %>%
+    group_by(huc8) %>%
+    slice(which.max(cor))
+
+tmp <- merge(shp, maxes.by.type, by.x = 'HUC8', by.y = 'huc8')
 
 n.max <- max(tmp$n)
 
@@ -209,8 +239,9 @@ p <- ggplot(tmp) +
      theme_bw() +
        scale_fill_gradient(name = "Months of data", limits = c(0, n.max), low = 'lightgreen', high = 'blue') +
      coord_sf(crs = st_crs(26910)) # set UTM zone 10 projection
-
 p
+#ggplotly(p)
+
 
 #chart_link = api_create(p, filename="plot_mos_in_hucs")
 #chart_link
@@ -286,7 +317,7 @@ cor.all.sites <- cor.all.sites %>%
 
 # Display table of correlations
 cor.all.sites %>% 
-  kable(col.names = c("HUC - imagery", "Gage w best correlation", "HUC - gage", "Data type", "r", 'Same HUC?','# times gage is selected'), digits = 3) %>%  
+  kable(col.names = c("HUC - imagery", "Gage w best correlation", "HUC - gage", "Data type", "r", 'Same HUC?','# times gage is 'best'), digits = 3) %>%  
   kable_styling("striped", full_width = FALSE) %>%
   row_spec(c(which(cor.all.sites$cor > 0.5)), bold = T) %>% 
   row_spec(c(which(cor.all.sites$same_huc=='N')), color = "red")
@@ -297,9 +328,6 @@ cor.all.sites <- data.frame(cor.all.sites)
 
 
 The 'super gage' here is site `r as.character(cor.all.sites[which.max(cor.all.sites$n), 'site_no'])` in HUC `r as.character(cor.all.sites[which.max(cor.all.sites$n), 'huc8.y'])`
-
-
-
 
 
 ####Super gage 
@@ -382,6 +410,7 @@ pk_ds_sg <- pk_ds_sg %>%
   do(lm_fit(.))
   
 
+pk_ds_sg.preinterp <- pk_ds_sg
 ```
 
 
@@ -394,29 +423,29 @@ pk_ds_sg$water <- ifelse(is.na(pk_ds_sg$water), pk_ds_sg$mean_va*pk_ds_sg$m + pk
 
 ```
 
+```{r, echo = FALSE}
+#<!-- <!-- ####Individual correlations --> -->
 
-<!-- <!-- ####Individual correlations --> -->
+#<!-- <!-- Highest correlation: HUC `r huc_max`, gage `r site_max` (r = `r format(cor_max, digits = 2)`) --> -->
+#<!-- <!-- ```{r, echo=FALSE, warning=FALSE} --> -->#
+#<!-- <!-- # ---------------------------------------------------------------------- # --> -->
 
-<!-- <!-- Highest correlation: HUC `r huc_max`, gage `r site_max` (r = `r format(cor_max, digits = 2)`) --> -->
-<!-- <!-- ```{r, echo=FALSE, warning=FALSE} --> -->
-<!-- <!-- # ---------------------------------------------------------------------- # --> -->
-
-<!-- <!-- # ---------------------------------------------------------------------- # --> -->
-
-
-<!-- <!-- ggplot(subset(sub_max, interp == 'N'), aes(mean_va, water)) +  --> -->
-<!-- <!--   geom_point() + #(aes(color= pk_type)) + --> -->
-<!-- <!--   geom_smooth(method = "lm", color = "red", formula = y ~ x, size = 1) + --> -->
-<!-- <!--   theme_bw() +  --> -->
-<!-- <!--   xlab(bquote('Discharge ('~ft^3~s^-1*')')) + --> -->
-<!-- <!--   ylab(bquote('Imagery water extent ('~km^2*')')) --> -->
-
-<!-- <!-- ``` --> -->
+#<!-- <!-- # ---------------------------------------------------------------------- # --> -->
 
 
-<!-- ####Pekel vs. DSWE correlations -->
+#<!-- <!-- ggplot(subset(sub_max, interp == 'N'), aes(mean_va, water)) +  --> -->
+#<!-- <!--   geom_point() + #(aes(color= pk_type)) + --> -->
+#<!-- <!--   geom_smooth(method = "lm", color = "red", formula = y ~ x, size = 1) + --> -->
+#<!-- <!--   theme_bw() +  --> -->
+#<!-- <!--   xlab(bquote('Discharge ('~ft^3~s^-1*')')) + --> -->
+#<!-- <!--   ylab(bquote('Imagery water extent ('~km^2*')')) --> -->
 
+#<!-- <!-- ``` --> -->
+```
 
+####Pekel vs. DSWE correlation
+
+How well do DSDWE and JRC/Pekel agree?
 ```{r, echo = F}
 
 # ---------------------------------------------------------------------- #
@@ -451,9 +480,8 @@ cor_pkds %>%
 Is there any spatial pattern to the correlations?  
 
 
-####Pekel vs. DSWE correlations  
+####Correlations - JRC/Pekel vs. DSWE
 
-Where do the two imagery datasets agree/disagree?
 ```{r, echo = FALSE}
 
 # ---------------------------------------------------------------------- #
@@ -470,13 +498,13 @@ ggplot(tmp) +
 ```
 
 
-####DSWE vs. gage correlations  
+####Correlations - DSWE vs. gage
 ```{r}
 # ---------------------------------------------------------------------- #
 #### Spatial plot of DSWE/gage correlations ####
 # ---------------------------------------------------------------------- #
 
-# Get the max for each type (Pekel, DSWE) by HUC
+# Get the max for DSWE by HUC
 
 cor_ds_sg_max <- cor_pdsg %>%
   filter(type == "dswe") %>% 
@@ -494,7 +522,7 @@ ggplot(tmp2) +
 ```
 
 
-####Pekel vs. gage correlations 
+####Correlations - Pekel vs. gage
 ```{r, echo = FALSE}
 
 # ---------------------------------------------------------------------- #
@@ -511,6 +539,7 @@ cor_pk_sg_max <- cor_pdsg %>%
 ggplot(tmp) + 
      geom_sf(aes(fill = cor)) +
      theme_bw() +
+    scale_fill_gradient(limits = c(0,1), low = 'green', high = 'blue') +
      coord_sf(crs = st_crs(26910)) # set UTM zone 10 projection
 
 
@@ -538,50 +567,116 @@ ggplot(tmp) +
 ```
 
 
-```{r}
+```{r, echo = FALSE, warning = FALSE}
 
 # hucs 18040002, 11274500 (dswe)
 # huc 18020002, 11351945 (dswe, 73)
 
 
-pk_ds_sg.sub <- subset(pk_ds_sg, huc8 == '18020002' & site_no == 11351945 & type == 'dswe')
-pk_ds_sg.sub.original <- pk_ds_sg.sub
-pk_ds_sg.sub2 <- subset(pk_ds_sg.backup, huc8 == '18020002' & site_no == 11351945 & type == 'dswe')
+for (huc in unique(maxes$huc8))
+  
+  
+  
+  - get the site_no for dswe
+  - get site_no for pekel
 
-pk_combined <- rbind(pk_ds_sg.sub.original, pk_ds_sg.sub2)
+
+# all imagery data - recorded and interpolated
+  df.all.dswe <- subset(pk_ds_sg, huc8 == '18020123' & site_no == 11406820 & type == 'dswe')
+  df.all.pekel <- subset(pk_ds_sg, huc8 == '18020123' & site_no == 11406820 & type == 'pekel')
+
+  pk_ds_sg.all <- rbind(df.all.dswe, df.all.pekel)
+  
+  # recorded only
+pk_ds_sg.rec <- pk_ds_sg.all %>% mutate(water = replace(water, which(interp == 'Y'), NA))
+
+# interpolated only
+pk_ds_sg.int <- pk_ds_sg.all %>% mutate(water = replace(water, which(interp == 'N'), NA))
+
+
+pk_combined <- rbind(pk_ds_sg.all, pk_ds_sg.rec)
+
+huc.name <- paste0("HUC ", df.all$huc8[1])
+
+  plot_interpolated_time_series <- function(df){
+    
+    
+  }
+  
+  
+```
+
 
   
-#geom_line(data = subset(test.sub, interp == 'N'), aes(date, water), color = 'red') + 
-#geom_line(data = subset(test.sub, interp = "Y"), aes(date, water), color = "blue")
+```{r, echo = FALSE, warning = FALSE}
 
-pk_ds_sg.sub$water[pk_ds_sg.sub$interp == "N"] <- NA
+# all imagery data - recorded and interpolated
+pk_ds_sg.all <- subset(pk_ds_sg, huc8 == '18020002' & site_no == 11351945) # & type == 'dswe')
 
-# Now pk_ds_sg.sub plots only the "real" data
-# pk_ds_sg.sub2 plots only the interpolated data 
+# recorded only
+pk_ds_sg.rec <- pk_ds_sg.all %>% mutate(water = replace(water, which(interp == 'Y'), NA))
 
-huc.name <- paste0("HUC ", pk_ds_sg.sub.original$huc8[1])
+# interpolated only
+pk_ds_sg.int <- pk_ds_sg.all %>% mutate(water = replace(water, which(interp == 'N'), NA))
 
-ggplot(pk_ds_sg.sub.original, aes(date, water)) + geom_line(size = .3) +
-     geom_line(data = pk_ds_sg.sub2, aes(date, water), color = 'red', size = .8) +
-   geom_point(data = pk_ds_sg.sub.original, aes(date, water, color = interp)) +
-  # geom_line(data = pk_ds_sg.sub.original, aes(date, mean_va/5), color = "blue" ) +
-   scale_linetype_manual("Dataset", values = c("darkblue"), labels = c("Estimated data", "Original data")) + 
-   scale_color_manual("Dataset", values = c("red", "black"), labels = c("Estimated data", "Original data")) + 
-   theme_bw() +
-   xlab("Date") +
-   ylab('DSWE monthly extent (sq km)') +
-   annotate("text", x = as.Date("2011-01-01"), y = 160, label = huc.name)
+# combine all and recorded 
+pk_combined <- rbind(pk_ds_sg.all, pk_ds_sg.rec)
+
+huc.name <- paste0("HUC ", pk_ds_sg.all$huc8[1])
+
+
+# change names
+# thanks, ttps://stackoverflow.com/questions/3472980/ggplot-how-to-change-facet-labels
+imagery.names <-  list('dswe'= "DSWE", 'pekel' = 'JRC/Pekel')
+imagery_labeller <- function(variable,value){
+  return(imagery.names[value])
+}
+
+
+# Plots
+p <- ggplot(pk_ds_sg.all, aes(date, water, group = type)) + 
+      geom_line(size = .3, color = 'black') +
+      geom_line(data = pk_ds_sg.int, aes(date, water), color = 'red', size = .8) +
+      geom_point(data = pk_ds_sg.all, aes(date, water, color = interp)) +
+#  geom_line(aes(linetype = type)) +
+#  scale_linetype_manual(values = c(1,1), labels = c("Measured data", "Estimated data")) +
+
+      scale_color_manual(values = c("black", "red"), labels = c("Measured data", "Estimated data")) + 
+ #   guides(linetype = guide_legend(override.aes = list(alpha=1))) +
+      theme_bw() +
+      theme(plot.margin=unit(c(1,1,1,1),"cm"),
+        legend.position =  c(0.95, 1.062), #'top', 
+        legend.justification = 'right',
+        legend.direction = 'horizontal',
+        legend.title = element_blank()) +
+      xlab("Date") +
+      ylab('Monthly extent (sq km)')  +
+      ggtitle(huc.name) +
+    scale_y_continuous(sec.axis = sec_axis(~.*300, name = "Stream gage discharge\n")) +  # 4.5
+  geom_area(data = pk_ds_sg.all, aes(date, mean_va/300), color = "blue",  alpha = 0.1)
+
+
+p + facet_grid(type ~ ., labeller=imagery_labeller, switch = 'y') +
+   theme(strip.background = element_rect(color="black", fill="white", linetype="solid"))
+ 
++
+  # second axis! https://rpubs.com/MarkusLoew/226759
+
+  scale_y_continuous(sec.axis = sec_axis(~.*4.5, name = "Stream gage discharge\n")) +
+  geom_area(data = pk_ds_sg.all, aes(date, mean_va/4.5), color = "blue",  alpha = 0.1)
+
+
+
 ```
 
 
 
 ```{r}
- ggplot(data = pk_ds_sg.sub.original, aes(date, mean_va)) + 
-  geom_line() +
-   scale_fill_manual("Dataset", values = c(22, 1), labels) +
-   geom_area(color = 'blue', alpha = 0.1) + 
+ ggplot(data = pk_ds_sg.all, aes(date, mean_va, group = type)) + 
+   scale_fill_manual("Dataset", values = c("blue", "lightblue")) + #, lab#) +
+   geom_area(color = 'blue', alpha = 0.1, aes(color = huc8)) + 
    theme_bw() +
    xlab("Date") +
-   ylab('Discharge (monthly mean)')
+   ylab('Discharge (mean/month)') 
 ```
 
