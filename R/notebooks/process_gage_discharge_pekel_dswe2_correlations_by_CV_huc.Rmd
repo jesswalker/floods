@@ -74,9 +74,11 @@ file.out <- paste0("CV_dswe_pekel_data_", nodata_threshold, "_pct_nodata.Rmd")
 
   - Pekel and DSWE monthly composites within all Central Valley HUCs retrieved from online Google Drive account
     - Both files processed to convert values, standardize names, etc. 
-    - In scenes with > **`r nodata_threshold`%** No Data, the imagery water values are zeroed out pending later interpolation
+    - In scenes with > **`r nodata_threshold`%** No Data, the water values are zeroed out pending later interpolation
   - Metadata retrieved from NWIS for all gages in Central Valley
   - Gages assessed for length of data record, data type
+    - Gage record has to include at least 10 years of data after 1984
+    - Discharge or gage height
   - Streamgage data retrieved (NWIS)
   - Correlations calculated between gage data, Pelel, and DSWE in each HUC
   - Output file is written to **`r file.path(path.out, file.out)`**
@@ -304,13 +306,13 @@ g <- do.call(rbind, lapply(hucs_all, gage_info))
 g$begin_date <- as.Date(g$begin_date, format = "%Y-%m-%d")
 g$end_date <- as.Date(g$end_date, format = "%Y-%m-%d")
 
-# Get gages that have an end date past 2010
-# Not sure why this was put in. Basically, we want >= 10 years of data between 1985 - 2016
-g.sub <- subset(g, end_date > "2010-01-01")
-
 # Calculate active time for each gage
-g.sub$time_active <- g.sub$end_date - g.sub$begin_date
+g$time_active <- g$end_date - g$begin_date
 
+
+# Only get gages with >= 10 years of data after 1984
+# 'Difftime' reported in days
+g.sub <- subset(g, end_date > "1994-01-01" & time_active > 3650)
 
 # site_no needs to be a number.
 # No, it doesn't! If there are leading zeros, this will weed them out
