@@ -77,7 +77,7 @@ file.out <- paste0("CV_dswe_pekel_data_", nodata_threshold, "_pct_nodata.Rmd")
     - In scenes with > **`r nodata_threshold`%** No Data, the water values are zeroed out pending later interpolation
   - Metadata retrieved from NWIS for all gages in Central Valley
   - Gages assessed for length of data record, data type
-    - Gage record has to include at least 10 years of data after 1984
+    - Gage record has to include at least 5 years of data after 1984
     - Discharge or gage height
   - Streamgage data retrieved (NWIS)
   - Correlations calculated between gage data, Pelel, and DSWE in each HUC
@@ -295,6 +295,11 @@ g <- do.call(rbind, lapply(hucs_all, gage_info))
 
 ```
 
+####Gage criteria
+
+Even when the gage data criteria are set correctly, the amount of data retrieved might be off. Site 11201800, for instance, has a start date of of 1908-10-01 and an end date of 1995-09-04.  That qualifies under the criteria of at least 5 years of data after 1984.  But looking at the data reveals that there are only daily values recorded from 1908-1912, and then a few from 1994 onward.
+
+Site 11451720 supposedly has data from 1958 to present, but in fact it stops in 1980 before briefly picking up again for two weeks at the end of 1997. 
 
 ```{r, echo=FALSE, warning=FALSE, message=FALSE}
 
@@ -310,13 +315,13 @@ g$end_date <- as.Date(g$end_date, format = "%Y-%m-%d")
 g$time_active <- g$end_date - g$begin_date
 
 
-# Only get gages with >= 10 years of data after 1984
-# 'Difftime' reported in days
-g.sub <- subset(g, end_date > "1994-01-01" & time_active > 3650)
+# Only get gages with >= 5 years of data after 1984
+# 'Difftime' reported in days but is unreliable as an indication of true data collection period
+g.sub <- subset(g, end_date > "1989-01-01" & time_active > 1800 & (parm_cd == '00060' | parm_cd == '00065'))
 
 # site_no needs to be a number.
 # No, it doesn't! If there are leading zeros, this will weed them out
-g.sub$site_no <- as.numeric(g.sub$site_no)
+#g.sub$site_no <- as.numeric(g.sub$site_no)
 
 # Get unique sites
 sites <- unique(g.sub$site_no)
@@ -382,7 +387,7 @@ sg$date <- as.Date(with(sg, sprintf("%s-%02s-01", year_nu, month_nu)), "%Y-%m-%d
 # Remove dates prior to 1984 and past Pekel data
 sg <- subset(sg, year_nu > 1983 & date < max(pk$date, na.rm = TRUE))
 
-# Ensure values are characters
+# Ensure values are numbers
 sg$mean_va <- as.numeric(sg$mean_va)
 
 # Pare down dataset--this requires sg as a data frame
@@ -404,10 +409,12 @@ colnames(sg)[which(colnames(sg) == "huc_cd")] <- "huc8"
 # Remove gages in which 
 # - all values are the same
 # - gage values are negative
+# - fewer than 5 years of overlapping data exist
 sg <- sg %>% 
     group_by(site_no) %>%
     filter(length(unique(mean_va)) > 1) %>%
-    filter(mean_va >= 0)
+    filter(mean_va >= 0) %>% 
+    filter(n() > 60)
 
 # Assign factors
 sg$site_no <- as.factor(sg$site_no)
@@ -444,8 +451,152 @@ pk_ds_sg$interp <- as.factor(pk_ds_sg$interp)
 
 
 # Save a copy
-pk_ds_sg.backup <- pk_ds_sg
+#pk_ds_sg.backup <- pk_ds_sg
 ```
+
+
+```{r, echo=FALSE, message=FALSE, include=FALSE}
+
+# ---------------------------------------------------------------------- #
+#### Get coefficients for each correlation ####
+# ---------------------------------------------------------------------- #
+
+# Function to apply linear fit
+lm_fit <- function(f) {
+  print(head(f))
+  fit <- lm(water ~ mean_va, data = f)
+  results <- broom::tidy(fit)
+  f$b <- results$estimate[1]
+  f$m <- results$estimate[2]
+#  if (residuals(fit)[1][[1]] > 0 & nrow(f) > 3) {  # necessary to put this in to screen overfit lm's...sometimes
+    #   }
+  return(f)
+}
+
+```
+
+
+```{r, echo = FALSE, message=FALSE, include=FALSE}
+# ---------------------------------------------------------------------- #
+#### Calculate correlations;  ####
+# ---------------------------------------------------------------------- #
+
+#ignore hucs in which all imagery values are NA
+pk_ds_sg$b <- 0
+pk_ds_sg$m <- 0
+pk_ds_sg <- pk_ds_sg %>% 
+  group_by(huc8, site_no, type, parameter_cd) %>% 
+  filter(sum(is.na(water)) != length(water)) %>%
+  do(lm_fit(.))
+  
+pk_ds_sg.preinterp <- pk_ds_sg
+```
+
+
+```{r, echo=FALSE}
+# ---------------------------------------------------------------------- #
+#### Replace NA imagery values with interpolated data ####
+# ---------------------------------------------------------------------- #
+
+pk_ds_sg$water <- ifelse(is.na(pk_ds_sg$water), pk_ds_sg$mean_va*pk_ds_sg$m + pk_ds_sg$b, pk_ds_sg$water)
+
+```
+
+
+
+```{r, echo = FALSE, warning = FALSE}
+
+# ---------------------------------------------------------------------- #
+#### Get gage with max correlation in each HUC - ALL GAGES ####
+# ---------------------------------------------------------------------- #
+
+# Do super gages that correlate well across many different HUCs exist?
+# Get the correlations of each site with all HUCs, then look at which site correlates best for each HUC and data type (Pekel, DSWE)
+
+# Calculate max correlations for imagery given info from all possible gages (i.e., not HUC-specific gages)
+cor.all <-  sg %>% 
+  modify_at('huc8', ~NULL) %>%  # strip out stream-gage HUC column and only use imagery HUC8 info
+  left_join(pk_ds, by = c('date')) %>%  
+  group_by(site_no, huc8, type) %>% 
+  summarize(cor = cor(water, mean_va, use = "pairwise.complete.obs", method = "pearson")) %>% 
+  group_by(huc8) %>% 
+  slice(which.max(cor))
+
+# Join site info from the GAGES back in
+# Late Friday I can't figure out a better way to code this join:
+sg.slim <- sg %>% distinct(site_no, huc8)
+cor.all.sites <- left_join(cor.all, sg.slim, by = c('site_no'), copy = F) 
+
+# Make sure HUC info is just a number
+cor.all.sites$huc8.x <-  as.numeric(as.character(cor.all.sites$huc8.x))
+cor.all.sites$huc8.y <-  as.numeric(as.character(cor.all.sites$huc8.y))
+
+# Are the gage and imagery in the same HC?
+cor.all.sites$same_huc <- 'Y'
+cor.all.sites$same_huc[cor.all.sites$huc8.x != cor.all.sites$huc8.y] <- 'N'
+
+# Rearrange table a bit
+cor.all.sites <-  cor.all.sites[, c('huc8.x', 'site_no', 'huc8.y', 'type', 'cor', 'same_huc')]
+
+# Get the number of times each gage appears
+cor.all.sites <- cor.all.sites %>% 
+  group_by(site_no) %>% 
+  mutate(n = n())
+
+
+```
+
+
+```{r, echo = FALSE, error = FALSE}
+
+# ---------------------------------------------------------------------- #
+#### Calculate correlations between gages and all DSWE classes ####
+# ---------------------------------------------------------------------- #
+
+# Oddly, rowSumming NA and 0 returns NA rather than 0.  This step gets around that.
+ds_sg <- subset(pk_ds_sg, type = 'dswe')
+
+# Correlations for data set before adding interpolated water values 
+# To sum water classes, we need to replace water2 and water3 NAs with 0, so that we can add them to water
+ds_sg[c('water2', 'water3', 'water4')][is.na(ds_sg[, c('water2', 'water3', 'water4')])] <- 0  #throws an error if no NA values
+
+# Sum water plus class 2,3,4
+ds_sg$waterplus2 <- rowSums(ds_sg[, c('water', 'water2')], na.rm = TRUE) * 
+        ifelse(rowSums(is.na(ds_sg[, c('water', 'water2')])) == ncol(ds_sg[, c('water', 'water2')]), NA, 1) 
+ds_sg$waterplus23 <- rowSums(ds_sg[, c('water', 'water2', 'water3')], na.rm = TRUE) * 
+        ifelse(rowSums(is.na(ds_sg[, c('water', 'water2', 'water3')])) == ncol(ds_sg[, c('water', 'water2', 'water3')]), NA, 1) 
+
+ds_sg$waterplus24 <- rowSums(ds_sg[, c('water', 'water2', 'water4')], na.rm = TRUE) * 
+        ifelse(rowSums(is.na(ds_sg[, c('water', 'water2', 'water4')])) == ncol(ds_sg[, c('water', 'water2', 'water4')]), NA, 1) 
+
+
+# Calculate correlations
+cor_dsg <- ds_sg %>% 
+  dplyr::filter(type == 'dswe') %>%
+  dplyr::group_by(huc8, site_no, type, parameter_cd) %>% 
+  dplyr::summarize(cor = cor(water, mean_va, use = "complete.obs", method = "pearson"),
+                   cor2 = cor(waterplus2, mean_va,use = "complete.obs", method = "pearson"),
+                   cor3 = cor(waterplus23, mean_va,use = "complete.obs", method = "pearson"),
+                   cor4 = cor(waterplus24, mean_va,use = "complete.obs", method = "pearson"),
+            n = sum(!is.na(water))) 
+
+# Get the max correlation for each HUC
+cor_dsg <- cor_dsg %>%
+    group_by(huc8) %>% 
+    slice(which.max(cor)) 
+
+
+```
+
+
+```
+
+
+
+
+
+
+
 
 ```{r, echo = FALSE}
 
