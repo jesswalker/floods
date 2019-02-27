@@ -294,41 +294,8 @@ Opening up the analysis to all gages, no matter what HUC they're in, reveals tha
 ```{r, echo = FALSE, warning = FALSE}
 
 # ---------------------------------------------------------------------- #
-#### Get gage with max correlation in each HUC - ALL GAGES ####
+#### DIsplay gage with max correlation in each HUC - ALL GAGES ####
 # ---------------------------------------------------------------------- #
-
-# Do super gages that correlate well across many different HUCs exist?
-# Get the correlations of each site with all HUCs, then look at which site correlates best for each HUC and data type (Pekel, DSWE)
-
-# Calculate max correlations for imagery given info from all possible gages (i.e., not HUC-specific gages)
-cor.all <-  sg %>% 
-  modify_at('huc8', ~NULL) %>%  # strip out stream-gage HUC column and only use imagery HUC8 info
-  left_join(pk_ds, by = c('date')) %>%  
-  group_by(site_no, huc8, type) %>% 
-  summarize(cor = cor(water, mean_va, use = "pairwise.complete.obs", method = "pearson")) %>% 
-  group_by(huc8) %>% 
-  slice(which.max(cor))
-
-# Join site info from the GAGES back in
-# Late Friday I can't figure out a better way to code this join:
-sg.slim <- sg %>% distinct(site_no, huc8)
-cor.all.sites <- left_join(cor.all, sg.slim, by = c('site_no'), copy = F) 
-
-# Make sure HUC info is just a number
-cor.all.sites$huc8.x <-  as.numeric(as.character(cor.all.sites$huc8.x))
-cor.all.sites$huc8.y <-  as.numeric(as.character(cor.all.sites$huc8.y))
-
-# Are the gage and imagery in the same HC?
-cor.all.sites$same_huc <- 'Y'
-cor.all.sites$same_huc[cor.all.sites$huc8.x != cor.all.sites$huc8.y] <- 'N'
-
-# Rearrange table a bit
-cor.all.sites <-  cor.all.sites[, c('huc8.x', 'site_no', 'huc8.y', 'type', 'cor', 'same_huc')]
-
-# Get the number of times each gage appears
-cor.all.sites <- cor.all.sites %>% 
-  group_by(site_no) %>% 
-  mutate(n = n())
 
 # Display table of correlations
 cor.all.sites %>% 
@@ -373,35 +340,7 @@ p
 
 Gage discharge and "highest confidence" water extent generally have the highest correlations. 
 
-```{r, echo = FALSE, error = FALSE}
-
-# ---------------------------------------------------------------------- #
-#### Calculate correlations between gages and all DSWE classes ####
-# ---------------------------------------------------------------------- #
-
-# Correlations for data set before adding interpolated water values 
-# To sum water classes, we need to replace water2 and water3 NAs with 0, so that we can add them to water
-pk_ds_sg[c('water2', 'water3', 'water4')][is.na(pk_ds_sg[, c('water2', 'water3', 'water4')])] <- 0  #throws an error if no NA values
-
-# Sum water plus class 2 and class 3
-pk_ds_sg$waterplus2 <- rowSums(pk_ds_sg[, c('water', 'water2')]) 
-pk_ds_sg$waterplus23 <- rowSums(pk_ds_sg[, c('water', 'water2', 'water3')]) 
-pk_ds_sg$waterplus24 <- rowSums(pk_ds_sg[, c('water', 'water2', 'water4')]) 
-
-# Calculate correlations
-cor_dsg <- pk_ds_sg %>% 
-  dplyr::filter(type == 'dswe') %>%
-  dplyr::group_by(huc8, site_no, type, parameter_cd) %>% 
-  dplyr::summarize(cor = cor(water, mean_va, use = "complete.obs", method = "pearson"),
-                   cor2 = cor(waterplus2, mean_va,use = "complete.obs", method = "pearson"),
-                   cor3 = cor(waterplus23, mean_va,use = "complete.obs", method = "pearson"),
-                   cor4 = cor(waterplus24, mean_va,use = "complete.obs", method = "pearson"),
-            n = sum(!is.na(water))) 
-
-# Display nicely
-cor_dsg <- cor_dsg %>%
-    group_by(huc8) %>% 
-    slice(which.max(cor)) 
+```{r, echo = FALSE}
  
 cor_dsg %>%  
     kable(col.names = c("HUC", "Site", "Data type", "Gage type", "r (w1)", "r (w1+w2)", "r (w1+w2+w3)", "r (w1+w2+w4)", "n"), digits = 3) %>%  
@@ -410,66 +349,7 @@ cor_dsg %>%
 ```
 
 
-```{r, echo=FALSE, message=FALSE, include=FALSE}
 
-# ---------------------------------------------------------------------- #
-#### Get coefficients for each correlation ####
-# ---------------------------------------------------------------------- #
-
-# Function to apply linear fit
-lm_fit <- function(f) {
-  print(head(f))
-  fit <- lm(water ~ mean_va, data = f)
-  results <- broom::tidy(fit)
-  f$b <- results$estimate[1]
-  f$m <- results$estimate[2]
-#  if (residuals(fit)[1][[1]] > 0 & nrow(f) > 3) {  # necessary to put this in to screen overfit lm's...sometimes
-    #   }
-  return(f)
-}
-
-
-# Calculate correlations; ignore hucs in which all imagery values are NA
-pk_ds_sg$b <- 0
-pk_ds_sg$m <- 0
-pk_ds_sg <- pk_ds_sg %>% 
-  group_by(huc8, site_no, type, parameter_cd) %>% 
-  filter(sum(is.na(water)) != length(water)) %>%
-  do(lm_fit(.))
-  
-
-pk_ds_sg.preinterp <- pk_ds_sg
-```
-
-
-```{r, echo=FALSE}
-# ---------------------------------------------------------------------- #
-#### Replace NA imagery values with interpolated data ####
-# ---------------------------------------------------------------------- #
-
-pk_ds_sg$water <- ifelse(is.na(pk_ds_sg$water), pk_ds_sg$mean_va*pk_ds_sg$m + pk_ds_sg$b, pk_ds_sg$water)
-
-```
-
-```{r, echo = FALSE}
-#<!-- <!-- ####Individual correlations --> -->
-
-#<!-- <!-- Highest correlation: HUC `r huc_max`, gage `r site_max` (r = `r format(cor_max, digits = 2)`) --> -->
-#<!-- <!-- ```{r, echo=FALSE, warning=FALSE} --> -->#
-#<!-- <!-- # ---------------------------------------------------------------------- # --> -->
-
-#<!-- <!-- # ---------------------------------------------------------------------- # --> -->
-
-
-#<!-- <!-- ggplot(subset(sub_max, interp == 'N'), aes(mean_va, water)) +  --> -->
-#<!-- <!--   geom_point() + #(aes(color= pk_type)) + --> -->
-#<!-- <!--   geom_smooth(method = "lm", color = "red", formula = y ~ x, size = 1) + --> -->
-#<!-- <!--   theme_bw() +  --> -->
-#<!-- <!--   xlab(bquote('Discharge ('~ft^3~s^-1*')')) + --> -->
-#<!-- <!--   ylab(bquote('Imagery water extent ('~km^2*')')) --> -->
-
-#<!-- <!-- ``` --> -->
-```
 
 ####Pekel vs. DSWE correlation
 
@@ -738,10 +618,6 @@ maxes %>%
     do(df.select = plot_function(.)) # 'do' to pass the groups individually; 'df.select' b/c a name is necessary for some reason
 
 ```
-
-
-
-
 
 
 

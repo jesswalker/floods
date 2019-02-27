@@ -85,7 +85,7 @@ file.out <- paste0("CV_dswe_pekel_data_", nodata_threshold, "_pct_nodata.Rmd")
   
   
 
-```{r, echo = FALSE, message = FALSE, include= FALSE}
+```{r, echo  TRUE, message = FALSE, include= FALSE}
 
 # ---------------------------------------------------------------------- #
 #### Download HUC GIS data from Google Drive ####
@@ -102,7 +102,7 @@ shp <- st_read(dsn = file.path(shp.dir, filename), stringsAsFactors = F)
 ```
 
 
-```{r, echo=FALSE}
+```{r, echo=TRUE}
 
 # ---------------------------------------------------------------------- #
 # ------ Function - Process Pekel data ---------
@@ -319,10 +319,6 @@ g$time_active <- g$end_date - g$begin_date
 # 'Difftime' reported in days but is unreliable as an indication of true data collection period
 g.sub <- subset(g, end_date > "1989-01-01" & time_active > 1800 & (parm_cd == '00060' | parm_cd == '00065'))
 
-# site_no needs to be a number.
-# No, it doesn't! If there are leading zeros, this will weed them out
-#g.sub$site_no <- as.numeric(g.sub$site_no)
-
 # Get unique sites
 sites <- unique(g.sub$site_no)
 
@@ -399,8 +395,8 @@ sg <- sg[, cols_to_keep]
 sg <- subset(sg, parameter_cd == '00065' | parameter_cd == "00060")
 
 # Replace parameter info
-sg[sg$parameter_cd=="00060", "parameter_cd"] <- "discharge"
-sg[sg$parameter_cd=="00065", "parameter_cd"] <- "gage ht"
+sg[sg$parameter_cd == "00060", "parameter_cd"] <- "discharge"
+sg[sg$parameter_cd == "00065", "parameter_cd"] <- "gage ht"
 
 # Attribute sites with HUC#
 sg <- merge(sg, site_info, by = "site_no")
@@ -458,12 +454,12 @@ pk_ds_sg$interp <- as.factor(pk_ds_sg$interp)
 ```{r, echo=FALSE, message=FALSE, include=FALSE}
 
 # ---------------------------------------------------------------------- #
-#### Get coefficients for each correlation ####
+#### Function: Get coefficients for each correlation ####
 # ---------------------------------------------------------------------- #
 
 # Function to apply linear fit
 lm_fit <- function(f) {
-  print(head(f))
+ # print(head(f))
   fit <- lm(water ~ mean_va, data = f)
   results <- broom::tidy(fit)
   f$b <- results$estimate[1]
@@ -478,7 +474,7 @@ lm_fit <- function(f) {
 
 ```{r, echo = FALSE, message=FALSE, include=FALSE}
 # ---------------------------------------------------------------------- #
-#### Calculate correlations;  ####
+#### Calculate correlation coefficients for imagery and gages in same HUC  ####
 # ---------------------------------------------------------------------- #
 
 #ignore hucs in which all imagery values are NA
@@ -498,7 +494,7 @@ pk_ds_sg.preinterp <- pk_ds_sg
 #### Replace NA imagery values with interpolated data ####
 # ---------------------------------------------------------------------- #
 
-pk_ds_sg$water <- ifelse(is.na(pk_ds_sg$water), pk_ds_sg$mean_va*pk_ds_sg$m + pk_ds_sg$b, pk_ds_sg$water)
+pk_ds_sg$water <- ifelse(is.na(pk_ds_sg$water), pk_ds_sg$mean_va * pk_ds_sg$m + pk_ds_sg$b, pk_ds_sg$water)
 
 ```
 
@@ -547,6 +543,80 @@ cor.all.sites <- cor.all.sites %>%
 ```
 
 
+```{r, echo = FALSE, message=FALSE, include=FALSE}
+# ---------------------------------------------------------------------- #
+#### Calculate correlation coefficients for imagery and gages in all HUCs  ####
+# ---------------------------------------------------------------------- #
+
+# Need to combine the datasets in a different way 
+
+
+# Select the HUC imagery and the corresponding best gage
+cor.all.sites.sub <- cor.all.sites %>% 
+                     select(huc8.x, site_no) %>% 
+                     rename(huc8.img = huc8.x)
+
+# Add in the sg info
+sg.mod <- left_join(sg, cor.all.sites.sub, by = c('site_no'))
+
+# Remove sites that don’t correlate well with any huc imagery (huc8.img); stream huc= huc8
+sg.mod <- sg.mod %>% 
+            filter(!is.na(huc8.img)) %>% 
+            rename("huc8.sg" = "huc8")
+
+# Get imagery data; join via huc8 and huc8.img
+pk_ds_sg.mod <- inner_join(pk_ds, sg.mod, by = c("date" = "date", "huc8" = "huc8.img"))
+
+# Cleanup 
+pk_ds_sg.mod <- pk_ds_sg.mod %>%
+       mutate(huc8 = factor(huc8), type = factor(type), site_no = factor(site_no), 
+              parameter_cd = factor(parameter_cd))
+
+pk_ds_sg.mod$interp <- ifelse(is.na(pk_ds_sg.mod$water), 'Y', 'N')
+pk_ds_sg.mod$interp <- as.factor(pk_ds_sg.mod$interp)
+
+
+
+
+#ignore hucs in which all imagery values are NA
+pk_ds_sg.mod$b <- 0
+pk_ds_sg.mod$m <- 0
+pk_ds_sg.mod <- pk_ds_sg.mod %>% 
+  group_by(huc8, site_no, type, parameter_cd) %>% 
+  filter(sum(is.na(water)) != length(water)) %>%
+  do(lm_fit(.))
+  
+pk_ds_sg.mod.preinterp <- pk_ds_sg.mod
+```
+
+
+```{r, echo=FALSE}
+# ---------------------------------------------------------------------- #
+#### Replace NA imagery values with interpolated data ####
+# ---------------------------------------------------------------------- #
+
+pk_ds_sg.mod$water <- ifelse(is.na(pk_ds_sg.mod$water), pk_ds_sg.mod$mean_va * pk_ds_sg.mod$m + pk_ds_sg.mod$b, pk_ds_sg.mod$water)
+
+```
+
+```{r, echo = FALSE}
+
+# Combine pk_ds_sg.mod, pk_ds_sg
+
+pk_ds_sg.mod <- pk_ds_sg.mod %>% select(-huc8.sg)
+
+pk_ds_sg.mod$file <- 'mod'
+pk_ds_sg$file <- 'orig'
+
+test <- rbind(pk_ds_sg, pk_ds_sg.mod)
+
+test$file <-  as.factor(test$file)
+
+```
+
+
+
+
 ```{r, echo = FALSE, error = FALSE}
 
 # ---------------------------------------------------------------------- #
@@ -557,7 +627,7 @@ cor.all.sites <- cor.all.sites %>%
 ds_sg <- subset(pk_ds_sg, type = 'dswe')
 
 # Correlations for data set before adding interpolated water values 
-# To sum water classes, we need to replace water2 and water3 NAs with 0, so that we can add them to water
+# To sum water classes, we need to replace water2 and water3 NAs with 0, so we can add them to water
 ds_sg[c('water2', 'water3', 'water4')][is.na(ds_sg[, c('water2', 'water3', 'water4')])] <- 0  #throws an error if no NA values
 
 # Sum water plus class 2,3,4
@@ -587,16 +657,6 @@ cor_dsg <- cor_dsg %>%
 
 
 ```
-
-
-```
-
-
-
-
-
-
-
 
 ```{r, echo = FALSE}
 
