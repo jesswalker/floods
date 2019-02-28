@@ -406,7 +406,7 @@ colnames(sg)[which(colnames(sg) == "huc_cd")] <- "huc8"
 # Remove gages in which 
 # - all values are the same
 # - gage values are negative
-# - fewer than 5 years of overlapping data exist
+# - fewer than 5 years of overlapping data exist.  This is necessary b/c the start, end dates aren't necessarily accurate
 sg <- sg %>% 
     group_by(site_no) %>%
     filter(length(unique(mean_va)) > 1) %>%
@@ -421,34 +421,44 @@ sg$huc8 <- as.factor(sg$huc8)
 ```
 
 
+
 ```{r, echo=FALSE, warning=FALSE, include=FALSE}
 
 # ---------------------------------------------------------------------- #
-# Calculate correlations between imagery and gages in same HUC ####
+# Calculate correlations between imagery and gages  ####
 # ---------------------------------------------------------------------- #
 
-# Merge Pekel/DSWE and gage data
-pk_ds_sg <- merge(pk_ds, sg, by = c("date", "huc8"))
+# Merge Pekel/DSWE and gage data by date. Rename sg HUC to avoid confusion between HUCs
+pk_ds_sg <-  sg %>% 
+   rename(huc8.sg = huc8) %>% 
+   right_join(pk_ds, by = c('date')) 
+
 
 # Assign factors 
 pk_ds_sg <- pk_ds_sg %>%
       mutate(huc8 = factor(huc8), 
              type = factor(type), 
-             site_no = factor(site_no), 
+             site_no = factor(site_no),  # may need to ungroup this one
              parameter_cd = factor(parameter_cd))
-
-# Calculate correlations for reduced data set (missing water values are not yet interpolated)
-# dplyr explicitly called here b/c plyr doesn't play well with others
-cor_pdsg <- pk_ds_sg %>% 
-  dplyr::group_by(huc8, site_no, type, parameter_cd) %>% 
-  dplyr::summarize(cor = cor(water, mean_va, use = "pairwise.complete.obs", method = "pearson"),
-            n = sum(!is.na(water))) 
 
 # Assign tag for whether imagery water data is interpolated (Y) or original (N)
 pk_ds_sg$interp <- ifelse(is.na(pk_ds_sg$water), 'Y', 'N')
 pk_ds_sg$interp <- as.factor(pk_ds_sg$interp)
 
+# Calculate correlations based on reduced data set (i.e., NA water values are not yet interpolated)
+# dplyr explicitly called here b/c plyr doesn't play well with others <- pk_ds_sg %>% 
+
+pk_ds_sg.cor <- pk_ds_sg %>% group_by(huc8, site_no, type, parameter_cd, huc8.sg) %>% 
+  #ungroup() %>% 
+  mutate(cor = cor(water, mean_va, use = "pairwise.complete.obs", method = "pearson"),
+            n = sum(!is.na(water))) 
+
+# Delete columns
+pk_ds_sg.cor <-  pk_ds_sg.cor %>% 
+  select(-c(nodata, notwater, sum, pct))
+
 ```
+
 
 
 ```{r, echo=FALSE, message=FALSE, include=FALSE}
@@ -474,19 +484,21 @@ lm_fit <- function(f) {
 
 ```{r, echo = FALSE, message=FALSE, include=FALSE}
 # ---------------------------------------------------------------------- #
-#### Calculate correlation coefficients for imagery and gages in same HUC  ####
+#### Calculate correlation coefficients for imagery and gages  ####
 # ---------------------------------------------------------------------- #
 
 #ignore hucs in which all imagery values are NA
-pk_ds_sg$b <- 0
-pk_ds_sg$m <- 0
-pk_ds_sg <- pk_ds_sg %>% 
-  group_by(huc8, site_no, type, parameter_cd) %>% 
+pk_ds_sg.cor$b <- 0
+pk_ds_sg.cor$m <- 0
+pk_ds_sg.cor <- pk_ds_sg.cor %>% 
+  group_by(huc8, site_no, type, parameter_cd, huc8.sg, cor) %>% 
   filter(sum(is.na(water)) != length(water)) %>%
+  filter(cor > 0.4) %>%  # Otherwise it takes ~4hours to run
   do(lm_fit(.))
   
-pk_ds_sg.preinterp <- pk_ds_sg
+pk_ds_sg.cor.preinterp <- pk_ds_sg.cor
 ```
+
 
 
 ```{r, echo=FALSE}
@@ -497,6 +509,21 @@ pk_ds_sg.preinterp <- pk_ds_sg
 pk_ds_sg$water <- ifelse(is.na(pk_ds_sg$water), pk_ds_sg$mean_va * pk_ds_sg$m + pk_ds_sg$b, pk_ds_sg$water)
 
 ```
+
+
+```{r, echo = FALSE}
+
+pk_ds_sg <- pk_ds_sg %>%
+  ungroup(huc8) %>% 
+      mutate(huc8 = factor(huc8), 
+             type = factor(type))
+
+
+```
+
+
+
+
 
 
 
@@ -596,7 +623,7 @@ pk_ds_sg.cor.preinterp <- pk_ds_sg.cor
 #### Replace NA imagery values with interpolated data ####
 # ---------------------------------------------------------------------- #
 
-pk_ds_sg.cor$water <- ifelse(is.na(pk_ds_sg.cor$water), pk_ds_sg.cor$mean_va * pk_ds_sg.cor$m + pk_ds_sg.cor$b, pk_ds_sg.cor$water)
+pk_ds_sg.cor$water <- ifelse(is.na(pk_ds_sg$water), pk_ds_sg$mean_va * pk_ds_sg.cor$m + pk_ds_sg.cor$b, pk_ds_sg.cor$water)
 
 ```
 
