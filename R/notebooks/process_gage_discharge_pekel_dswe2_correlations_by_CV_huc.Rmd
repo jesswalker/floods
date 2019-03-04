@@ -243,7 +243,7 @@ return(df)
 # my drive/WORK/__PLACE/data/dswe_v2_cv_huc_data_monthly_composites.csv
 # my drive/WORK/__PLACE/GEE_output/dswe_monthly_HUC_summaries_1984_2016.csv
 
-data_url = "1hBTBzBh-J-jzbTBYe-X0Tpj3uvNSxpjH"
+data_url = "1UPQNdonpw0I23yAIAJm0rnq198maTSBu"
 f.csv <- read.csv(sprintf("https://docs.google.com/uc?id=%s&export=download", data_url))
 ds <- process_dswe(f.csv, nodata_threshold)
 
@@ -436,6 +436,7 @@ pk_ds_sg <-  sg %>%
 
 # Assign factors 
 pk_ds_sg <- pk_ds_sg %>%
+        ungroup(site_note)  %>% 
       mutate(huc8 = factor(huc8), 
              type = factor(type), 
              site_no = factor(site_no),  # may need to ungroup this one
@@ -487,16 +488,25 @@ lm_fit <- function(f) {
 #### Calculate correlation coefficients for imagery and gages  ####
 # ---------------------------------------------------------------------- #
 
+
+
 #ignore hucs in which all imagery values are NA
 pk_ds_sg.cor$b <- 0
 pk_ds_sg.cor$m <- 0
-pk_ds_sg.cor <- pk_ds_sg.cor %>% 
+# Start the clock
+start_time <- Sys.time()
+
+  pk_ds_sg.cor <- pk_ds_sg.cor %>% 
   group_by(huc8, site_no, type, parameter_cd, huc8.sg, cor) %>% 
   filter(sum(is.na(water)) != length(water)) %>%
-  filter(cor > 0.4) %>%  # Otherwise it takes ~4hours to run
+  filter(cor > 0.2) %>%  # Otherwise it takes ~4hours to run
   do(lm_fit(.))
+
+end_time <- Sys.time()
+end_time - start_time
   
 pk_ds_sg.cor.preinterp <- pk_ds_sg.cor
+
 ```
 
 
@@ -506,20 +516,23 @@ pk_ds_sg.cor.preinterp <- pk_ds_sg.cor
 #### Replace NA imagery values with interpolated data ####
 # ---------------------------------------------------------------------- #
 
-pk_ds_sg$water <- ifelse(is.na(pk_ds_sg$water), pk_ds_sg$mean_va * pk_ds_sg$m + pk_ds_sg$b, pk_ds_sg$water)
+pk_ds_sg.cor$water <- ifelse(is.na(pk_ds_sg.cor$water), pk_ds_sg.cor$mean_va * pk_ds_sg.cor$m + pk_ds_sg.cor$b, pk_ds_sg.cor$water)
 
 ```
 
 
 ```{r, echo = FALSE}
 
-pk_ds_sg <- pk_ds_sg %>%
+pk_ds_sg.cor <- pk_ds_sg.cor %>%
   ungroup(huc8) %>% 
       mutate(huc8 = factor(huc8), 
              type = factor(type))
 
 
 ```
+
+
+
 
 
 
