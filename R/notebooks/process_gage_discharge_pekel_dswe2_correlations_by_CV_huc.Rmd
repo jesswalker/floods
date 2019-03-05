@@ -541,12 +541,13 @@ pk_ds_sg.int <- pk_ds_sg.int %>%
 
 cor.huc.max <- pk_ds_sg.int %>% 
   filter(huc8.img == huc8.sg) %>% 
-  group_by(huc8.img, site_no) %>% 
+  group_by(huc8.img, type) %>% 
+  select(-c(date, water, interp, mean_va, b, m)) %>% 
   slice(which.max(cor))
 
 # Calculate max correction given all possible gages
 cor.all.max <- pk_ds_sg.int %>% 
-  group_by(huc8.img) %>% 
+  group_by(huc8.img, type) %>% 
   slice(which.max(cor))
 
 # Are the gage and imagery in the same HC?
