@@ -73,7 +73,7 @@ nodata_threshold <- 5
 
 #plots are saved to path.out/plots
 
-path.out <-  "D:/projects/place"
+path.out <-  "E:/projects/place"
 
 shp.dir <- file.path(path.out, "R", "shp")
 
@@ -167,13 +167,14 @@ The _highest_ Pearson correlations between monthly imagery data and monthly stre
 
 #If the table rather than the plot is displayed, use Bolded values are > 0.5.
 
-maxes <- pk_ds_sg.cor %>%
+maxes <- cor.huc.max %>%
     select(huc8.img, site_no, parameter_cd, type, cor, -c(interp, n, b, m, huc8.sg)) %>% 
-    group_by(huc8.img, site_no, type) %>%
-    mutate(n = n()) %>% 
+  #  group_by(huc8.img, type) %>%
+ #   mutate(n = n()) %>% 
     slice(which.max(cor))
 
 maxes %>%
+    select(huc8.img, site_no, parameter_cd, type, cor, n) %>% 
     kable(col.names = c("HUC", "Gage", "Gage type", "Data type", "r", "# months of data"), digits = 3) %>%  
     kable_styling("striped", full_width = FALSE) %>%
     row_spec(c(which(maxes$cor > 0.5)), bold = T) 

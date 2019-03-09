@@ -55,7 +55,7 @@ nodata_threshold <- 5
 ```
 
 
-```{r,include = F, results = 'hide'}
+```{r, include = F, results = 'hide'}
 
 # ---------------------------------------------------------------------- #
 #### Set output files and folders ####
@@ -240,7 +240,7 @@ return(df)
 # ---------------------------------------------------------------------- #
 
 # Get DSWE monthly composites across entire CV HUCSs
-# my drive/WORK/__PLACE/GEE_output/dswe2_0_monthly_HUC_summaries_1984_2016.csv
+# my drive/WORK/__PLACE/GEE_output/dswe2_0_monthly_HUC_summaries_1984_2016.csv  4 Mar 2019 edition
 
 data_url = "1UPQNdonpw0I23yAIAJm0rnq198maTSBu"
 f.csv <- read.csv(sprintf("https://docs.google.com/uc?id=%s&export=download", data_url))
@@ -354,7 +354,7 @@ for (site in sites) {
 }  
 
 # Save a file
-#write.csv(sg, file = "d:/projects/place/data/tables/sg.csv", row.names = F)
+ #write.csv(sg, file = "E:/projects/place/data/tables/sg.csv", row.names = F)
 # https://drive.google.com/open?id=1GZv8M9dmT9vH8ccetZTHFI_KOXUbhp04
 
 ```
@@ -420,7 +420,7 @@ sg$huc8 <- as.factor(sg$huc8)
 ```{r, echo=FALSE, warning=FALSE, include=FALSE}
 
 # ---------------------------------------------------------------------- #
-# Calculate correlations between imagery and gages  for all HUCs####
+# Merge imagery and stream gage data across all HUCs####
 # ---------------------------------------------------------------------- #
 
 # Merge Pekel/DSWE and gage data by date. Rename sg HUC to avoid confusion between HUCs
@@ -444,8 +444,30 @@ pk_ds_sg <- pk_ds_sg %>%
 # Assign tag for whether imagery water data is interpolated (Y) or original (N)
 pk_ds_sg$interp <- ifelse(is.na(pk_ds_sg$water), 'Y', 'N')
 pk_ds_sg$interp <- as.factor(pk_ds_sg$interp)
+```
 
-# Calculate correlations based on reduced data set (i.e., NA water values are not yet interpolated)
+```{r, echo=FALSE, warning=FALSE, include=FALSE}
+
+# ---------------------------------------------------------------------- #
+# save file of merged data ####
+# ---------------------------------------------------------------------- #
+# Save a file
+ #write.csv(sg, file = "E:/projects/place/data/tables/sg.csv", row.names = F)
+# https://drive.google.com/open?id=1GZv8M9dmT9vH8ccetZTHFI_KOXUbhp04
+
+```
+
+
+
+
+```{r, echo=FALSE, warning=FALSE, include=FALSE}
+
+# ---------------------------------------------------------------------- #
+# Calculate correlations between imagery and gages for all HUCs####
+# ---------------------------------------------------------------------- #
+
+
+# Calculate Pearson correlations based on reduced data set (i.e., NA water values are not yet interpolated)
 pk_ds_sg.cor <- pk_ds_sg %>% 
   select(-c(water2, water3, water4)) %>% 
   group_by(huc8.img, site_no, type, parameter_cd, huc8.sg) %>% 
