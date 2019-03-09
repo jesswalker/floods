@@ -1,0 +1,271 @@
+---
+title: "Calculate correlations between stream gage data and JRC/DSWE 2.0 data in California's Central Valley"
+fontsize: 9
+output: html_notebook
+editor_options:
+  chunk_output_type: inline
+---
+
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+
+## ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+## 2_calculate_gage_jrc_dswe2_correlations_by_CV_hucs.Rmd
+## ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+# ---------------------------------------------------------------------- #
+#### General setup ####
+# ---------------------------------------------------------------------- #
+
+# Load packages in a way that's easy for others to as well
+# Credit due: Simon at https://stackoverflow.com/questions/4090169/elegant-way-to-check-for-missing-packages-and-install-them
+
+loadPackages <- function(pkgs){
+  for (pkg in pkgs){
+    #  require returns TRUE invisibly if it was able to load package
+    if(!require(pkg, character.only = TRUE)){
+      #  If package was not able to load, re-install
+      install.packages(pkg, dependencies = TRUE)
+      #  Load package after installing
+      require(pkg, character.only = TRUE)
+    }
+  }
+}
+
+# Load packages
+loadPackages(c("dataRetrieval", "plyr", "tidyverse", 'data.table', 'knitr', 'kableExtra', 'devtools', 'googledrive', 'zoo'))
+
+# Set default as echo FALSE
+knitr::opts_chunk$set(echo = FALSE)
+
+
+```
+
+
+```{r, echo=FALSE}
+
+# ---------------------------------------------------------------------- #
+#### Set NoData threshold ####
+# ---------------------------------------------------------------------- #
+
+# This is not dynamic; this identifies which file to load
+
+nodata_threshold <- 5
+
+```
+
+
+```{r,include = F, results = 'hide'}
+
+# ---------------------------------------------------------------------- #
+#### Set files and folders ####
+# ---------------------------------------------------------------------- #
+
+path.data <-  "E:/projects/place/data"
+
+file.in <- file.path(path.data, paste0("CV_dswe_jrc_data_", nodata_threshold, "_pct_nodata_merged.RData"))
+file.out <- paste0("CV_dswe_jrc_data_", nodata_threshold, "_pct_nodata_correlations.RData")
+
+
+# Set path to shapefile directory
+#shp.dir <- file.path(path.out, "shp")
+#ifelse(!dir.exists(shp.dir), dir.create(shp.dir), FALSE)
+
+```
+
+
+```{r, echo=FALSE}
+
+# ---------------------------------------------------------------------- #
+#### Load file of processed data ####
+# ---------------------------------------------------------------------- #
+
+load(file.in)
+
+```
+
+
+```{r, echo=FALSE, warning=FALSE, include=FALSE}
+
+# ---------------------------------------------------------------------- #
+# Calculate correlations between imagery and gages for all HUCs####
+# ---------------------------------------------------------------------- #
+
+
+# Calculate Pearson correlations based on reduced data set (i.e., NA water values are not yet interpolated)
+pk_ds_sg.cor <- pk_ds_sg %>% 
+#  select(-c(water2, water3, water4)) %>% 
+  group_by(huc8.img, site_no, type, parameter_cd, huc8.sg) %>% 
+  #ungroup() %>% 
+  mutate(cor = cor(water, mean_va, use = "pairwise.complete.obs", method = "pearson"),
+            n = sum(!is.na(water))) 
+
+```
+
+
+
+```{r, echo=FALSE, message=FALSE, include=FALSE}
+
+# ---------------------------------------------------------------------- #
+#### Function: Get coefficients for each correlation ####
+# ---------------------------------------------------------------------- #
+
+# Function to apply linear fit
+lm_fit <- function(f) {
+ # print(head(f))
+  fit <- lm(water ~ mean_va, data = f)
+  results <- broom::tidy(fit)
+  f$b <- results$estimate[1]
+  f$m <- results$estimate[2]
+#  if (residuals(fit)[1][[1]] > 0 & nrow(f) > 3) {  # necessary to put this in to screen overfit lm's...sometimes
+    #   }
+  return(f)
+}
+
+```
+
+
+```{r, echo = FALSE, message=FALSE, include=FALSE}
+# ---------------------------------------------------------------------- #
+#### Calculate correlation coefficients for imagery and gages from all HUCs ####
+# ---------------------------------------------------------------------- #
+
+#ignore hucs in which all imagery values are NA
+pk_ds_sg.cor$b <- 0
+pk_ds_sg.cor$m <- 0
+# Start the clock
+start_time <- Sys.time()
+
+  pk_ds_sg.int <- pk_ds_sg.cor %>% 
+  group_by(huc8.img, site_no, type, parameter_cd, huc8.sg, cor) %>% 
+  filter(sum(is.na(water)) != length(water)) %>%
+  filter(abs(cor) != 0.0) %>%  # 
+  do(lm_fit(.))
+
+end_time <- Sys.time()
+end_time - start_time
+  
+```
+
+
+```{r, echo = F}
+
+# ---------------------------------------------------------------------- #
+#### Get Pekel/DSWE correlations ####
+# ---------------------------------------------------------------------- #
+
+pk.sub <- pk[, c('date', 'water', 'huc8')]
+colnames(pk.sub)[2] <- 'water_pk'
+
+ds.sub <- ds[, c('date', 'water', 'huc8')]
+colnames(ds.sub)[2] <- 'water_ds'
+
+pk_ds.sub <- merge(pk.sub, ds.sub, by = c('date', 'huc8'))
+
+# Calculate correlations
+cor_pkds <- pk_ds.sub %>% 
+  dplyr::group_by(huc8) %>% 
+  dplyr::summarize(cor = cor(water_pk, water_ds, use = "complete.obs", method = "kendall"), 
+            n_pekel = sum(!is.na(water_pk)),
+            n_dswe = sum(!is.na(water_ds))) # Used to look at correlation between data density and correlation
+
+```
+
+
+```{r, echo=FALSE}
+# ---------------------------------------------------------------------- #
+#### Replace NA imagery values with interpolated data ####
+# ---------------------------------------------------------------------- #
+
+pk_ds_sg.int$water <- ifelse(is.na(pk_ds_sg.int$water), pk_ds_sg.int$mean_va * pk_ds_sg.int$m + pk_ds_sg.int$b, pk_ds_sg.int$water)
+
+```
+
+
+```{r, echo = FALSE}
+
+# ---------------------------------------------------------------------- #
+#### Housekeeping ####
+# ---------------------------------------------------------------------- #
+
+# HUCs have to be numeric b/c they have different factor levels which kills comparisons
+pk_ds_sg.int <- pk_ds_sg.int %>%
+  ungroup(huc8) %>% 
+      mutate(huc8.img = as.numeric(as.character(huc8.img)),
+             huc8.sg = as.numeric(as.character(huc8.sg)),
+             type = factor(type))
+
+```
+
+
+```{r, echo = FALSE, warning = FALSE}
+
+# ---------------------------------------------------------------------- #
+#### Get max correlations within HUCs and without ####
+# ---------------------------------------------------------------------- #
+
+# Calculate max correlation for imagery given gages in the same HUC
+cor.huc.max <- pk_ds_sg.int %>% 
+  filter(huc8.img == huc8.sg) %>% 
+  group_by(huc8.img, type) %>% 
+  select(-c(date, water, interp, mean_va, b, m)) %>% 
+  slice(which.max(cor))
+
+# Calculate max correlation for imagery given all possible gages
+cor.all.max <- pk_ds_sg.int %>% 
+  group_by(huc8.img, type) %>% 
+  slice(which.max(cor)) %>% 
+  group_by(site_no) %>% 
+  mutate(n_site = n()) # Get the number of times each gage appears
+
+# Are the gage and imagery in the same HC?
+cor.all.max$same_huc <- NA
+cor.all.max$same_huc <- 'Y'
+cor.all.max$same_huc[cor.all.max$huc8.img != cor.all.max$huc8.sg] <- 'N'
+
+```
+
+
+```{r, echo = FALSE, error = FALSE}
+
+# ---------------------------------------------------------------------- #
+#### Calculate correlations between gages and all DSWE classes ####
+# ---------------------------------------------------------------------- #
+
+# Select only uninterpolated DSWE values
+ds_sg <- subset(pk_ds_sg, type == 'dswe' & interp == 'N')
+
+# rowSumming NA and 0 returns NA rather than 0. Setting it up like this returns 0 instead of NA.
+# Sum water plus class 2,3,4
+ds_sg$waterplus2 <- rowSums(ds_sg[, c('water', 'water2')], na.rm = TRUE) * 
+        ifelse(rowSums(is.na(ds_sg[, c('water', 'water2')])) == ncol(ds_sg[, c('water', 'water2')]), NA, 1) 
+
+ds_sg$waterplus23 <- rowSums(ds_sg[, c('water', 'water2', 'water3')], na.rm = TRUE) * 
+        ifelse(rowSums(is.na(ds_sg[, c('water', 'water2', 'water3')])) == ncol(ds_sg[, c('water', 'water2', 'water3')]), NA, 1) 
+
+ds_sg$waterplus24 <- rowSums(ds_sg[, c('water', 'water2', 'water4')], na.rm = TRUE) * 
+        ifelse(rowSums(is.na(ds_sg[, c('water', 'water2', 'water4')])) == ncol(ds_sg[, c('water', 'water2', 'water4')]), NA, 1) 
+
+# Calculate correlations
+ds_sg.cor <- ds_sg %>% 
+  filter(!is.na(mean_va)) %>% 
+  group_by(huc8.img, site_no, parameter_cd) %>% 
+  summarize(cor = cor(water, mean_va, use = "complete.obs", method = "pearson"),
+                   cor2 = cor(waterplus2, mean_va,use = "complete.obs", method = "pearson"),
+                   cor3 = cor(waterplus23, mean_va,use = "complete.obs", method = "pearson"),
+                   cor4 = cor(waterplus24, mean_va,use = "complete.obs", method = "pearson"),
+            n = sum(!is.na(water))) 
+
+```
+
+
+```{r, echo = FALSE}
+
+# ---------------------------------------------------------------------- #
+# save file of merged data ####
+# ---------------------------------------------------------------------- #
+
+#save(cor.all.max, cor.huc.max, pk_ds, ds_sg, pk_ds_sg.int, file = file.path(path.data, file.out))
+
+```
+

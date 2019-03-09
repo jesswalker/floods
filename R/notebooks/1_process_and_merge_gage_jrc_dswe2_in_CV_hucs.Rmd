@@ -1,0 +1,433 @@
+---
+title: "Process and merge stream gage data with JRC and DSWE 2.0 data in California's Central Valley"
+fontsize: 9
+output: html_notebook
+editor_options:
+  chunk_output_type: inline
+---
+
+
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+
+## ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+## 1_process_and_merge_gage_jrc_dswe2_in_CV_hucs.Rmd
+## ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+# ---------------------------------------------------------------------- #
+# General setup ####
+# ---------------------------------------------------------------------- #
+
+# Load packages in a way that's easy for others to as well
+# Credit due: Simon at https://stackoverflow.com/questions/4090169/elegant-way-to-check-for-missing-packages-and-install-them
+
+loadPackages <- function(pkgs){
+  for (pkg in pkgs){
+    #  require returns TRUE invisibly if it was able to load package
+    if(!require(pkg, character.only = TRUE)){
+      #  If package was not able to load, re-install
+      install.packages(pkg, dependencies = TRUE)
+      #  Load package after installing
+      require(pkg, character.only = TRUE)
+    }
+  }
+}
+
+# Load packages
+loadPackages(c("dataRetrieval", "plyr", "tidyverse", 'data.table', 'knitr', 'kableExtra', 'devtools', 'googledrive'))
+
+# Set default as echo FALSE
+knitr::opts_chunk$set(echo = FALSE)
+
+```
+
+```{r, echo=FALSE}
+
+# ---------------------------------------------------------------------- #
+#### Set NoData threshold ####
+# ---------------------------------------------------------------------- #
+
+nodata_threshold <- 5
+
+```
+
+
+```{r, include = F, results = 'hide'}
+
+# ---------------------------------------------------------------------- #
+#### Set output files and folders ####
+# ---------------------------------------------------------------------- #
+
+path.out <-  "E:/projects/place/data"
+
+file.out <- paste0("CV_dswe_jrc_data_", nodata_threshold, "_pct_nodata_merged.RData")
+
+
+```
+####Steps  
+
+  - JRC/Pekel and DSWE 2.0 monthly composites within all Central Valley HUCs retrieved from online Google Drive account
+    - Both files processed to convert values, standardize names, etc. 
+    - In scenes with > **`r nodata_threshold`%** No Data, the water values are zeroed out pending later interpolation
+  - Metadata retrieved from NWIS for all gages in Central Valley
+  - Gages assessed for length of data record, data type
+    - Gage record has to include at least 5 years of data after 1984
+    - Discharge or gage height
+  - Stream gage data retrieved (NWIS)
+  - Stream gage, JRC, and DSWE data combined for all HUCs
+  
+  - Output file is written to **`r file.path(path.out, 'data', file.out)`**
+  
+ 
+
+```{r, echo=TRUE}
+
+# ---------------------------------------------------------------------- #
+# ------ Function - Process Pekel data ---------
+# ---------------------------------------------------------------------- #
+
+process_pekel <- function(df, nodata_cap) {
+  
+  df$date <- as.Date(df$date, format = "%Y-%m-%d")
+  
+# First row is nonsense  
+  df <- df[-1,]
+
+# X0 = no data, # X1 = not water # X2 = water
+  cols_to_keep <- c("date", "huc8", "X0", "X1", "X2")
+  df <- df[, cols_to_keep]
+  colnames(df) <- c("date", "huc8", "nodata", "notwater", "water")
+
+# Convert from pixels in m^2 to km^2: 900 m^2/pixel x 1e-06 km^2/m^2
+  df$water <- df$water * 0.0009  
+  df$notwater <- df$notwater * 0.0009  
+  df$nodata <- df$nodata * 0.0009  
+
+# Convert "water" --> NA in rows where nodata exceeds <threshold>% of the total
+  df$sum <- rowSums(df[, c("nodata", "notwater", "water")], na.rm = T)
+  df$pct <- df$nodata/df$sum * 100
+  df$water[df$pct > nodata_cap] <- NA
+
+return(df)
+}
+
+```
+
+
+```{r,echo=FALSE, message = FALSE, warning = FALSE}
+
+# ---------------------------------------------------------------------- #
+#### Get Pekel unbuffered data ####
+# ---------------------------------------------------------------------- #
+
+# Get Pekel monthly composites within all Central Valley HUCs
+# MyDrive/WORK/__PLACE/GEE_output/pekel_monthly_CV_HUC8s_Albers.csv
+
+data_url = "1neHmlcTseqKTlF5tRs38Ruawzua-hCtc"
+f.csv <- read.csv(sprintf("https://docs.google.com/uc?id=%s&export=download", data_url))
+pk <- process_pekel(f.csv, nodata_threshold)
+
+# Somehow date info goes awry
+pk$date <- as.Date(pk$date, format = "%Y-%m-%d")
+```
+
+
+```{r, echo=FALSE, message = FALSE, warning = FALSE}
+
+# ---------------------------------------------------------------------- #
+# ------ Function - Process DSWE data ------
+# ---------------------------------------------------------------------- #
+
+process_dswe <- function(df, nodata_cap) {
+  
+# X0 = no data, # X1 = not water # X2 = water (high), X3 = water(low conf), X4 = wetland, X5 = water/wetand (low), nodata = clouds, etc., null = no data was present
+  colnames(df) <- c("name", 'huc8', "notwater", "water", "water2", "water3", "water4", "nodata", "null", "sqkm")
+
+# Convert name to character
+  df <-  df %>% mutate_if(is.factor, as.character) 
+  
+# First row is useless
+  df <- df[-1,]
+  
+# Split name to extract date
+ #  df$name <- substr(df$name, 1, nchar(df$name) - 4)
+ #  df.split <- strsplit(df$name, "\\_")
+ #  df <- transform(df, year = sapply(df.split, "[[", 2), month = sapply(df.split, "[[", 3))
+  
+# Split name to extract date 
+  df$name <- gsub("[[:punct:]]", "", df$name)
+  df$name <- gsub("[a-zA-Z ]", "", df$name)
+  df$year <- substr(df$name, 1, 4)
+  df$month <- substr(df$name, 5, nchar(df$name))
+
+# Flip the order of the files from starting at the beginning of the year to the end (i.e, file 1 = Dec)
+  #df$inverted_month <- plyr::mapvalues(df$month, from = c(seq(1, 12)), to = c(seq(12, 1)))
+  #df$month <- df$inverted_month
+  #df$inverted_month <- NULL
+  
+# Convert to date
+  df$date <- as.Date(paste(df$year, df$month, "01", sep = "-"), format = "%Y-%m-%d")
+
+# Convert from  m^2 to km^2: 1m^2 = 1e-6 km^2
+  # df$notwater <- df$notwater * 0.000001  
+  # df$nodata <- df$nodata * 0.000001
+  # df$water <- df$water * 0.000001  
+  # df$water2 <- df$water2 * 0.000001  
+  # df$water3 <- df$water3 * 0.000001  
+  # df$water4 <- df$water4 * 0.000001 
+  
+  
+# Convert from  pixels to km^2: 1 pixel = 900 m^2 = 0.0009 km^2
+  df$notwater <- df$notwater * 0.0009  
+  df$nodata <- df$nodata * 0.0009
+  df$water <- df$water * 0.0009 
+  df$water2 <- df$water2 * 0.0009  
+  df$water3 <- df$water3 * 0.0009 
+  df$water4 <- df$water4 * 0.0009 
+  df$null <- df$null * 0.0009
+  
+  
+# Convert "water" --> NA in rows where nodata > x% of the total imaged data
+# Leaving out 'null' b/c typically that's generated by a missing image
+  df$sum <- rowSums(df[, c("nodata", "notwater", "water", "water2", "water3", "water4")], na.rm = T)
+  df$pct <- df$nodata/df$sum * 100
+  df$water[df$pct > nodata_cap] <- NA
+  df$water2[df$pct > nodata_cap] <- NA
+  df$water3[df$pct > nodata_cap] <- NA
+  df$water4[df$pct > nodata_cap] <- NA
+  
+# clean up
+  df$name <- NULL
+  df$year <- NULL
+  df$month <- NULL
+  df$sqkm <- NULL
+  df$null <- NULL
+
+return(df)
+
+}
+
+```
+
+
+```{r,echo=FALSE, message = FALSE, warning = FALSE}
+
+# ---------------------------------------------------------------------- #
+#### Get DSWE unbuffered data ####
+# ---------------------------------------------------------------------- #
+
+# Get DSWE monthly composites across entire CV HUCSs
+# my drive/WORK/__PLACE/GEE_output/dswe2_0_monthly_HUC_summaries_1984_2016.csv  4 Mar 2019 edition
+
+data_url = "1UPQNdonpw0I23yAIAJm0rnq198maTSBu"
+f.csv <- read.csv(sprintf("https://docs.google.com/uc?id=%s&export=download", data_url))
+ds <- process_dswe(f.csv, nodata_threshold)
+
+```
+
+
+```{r,echo=FALSE, message = FALSE, warning = FALSE}
+
+# ---------------------------------------------------------------------- #
+#### Merge Pekel and DSWE data ####
+# ---------------------------------------------------------------------- #
+
+# Add columns to Pekel data to match DSWE
+pk$water2 <- NA
+pk$water3 <- NA
+pk$water4 <- NA
+
+# Add ID tag to both 
+ds$type <-  'dswe'
+pk$type <- 'pekel'
+
+# Combine
+pk_ds <- rbind(pk, ds)
+
+```
+
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE, include=FALSE}
+
+# ---------------------------------------------------------------------- #
+#### Stream gage - read in gage info (not data) for CV HUCs ####
+# ---------------------------------------------------------------------- #
+
+# This will allow us to narrow the list of desired gages based on the data available in each
+
+hucs_all <- c('18020002', '18020003','18020004', '18020005', '18020104', '18020111', '18020115',
+'18020116', '18020121', '18020122', '18020123', '18020125', '18020126', '18020128', '18020129', '18020151',
+'18020152', '18020153', '18020154', '18020155', '18020156', '18020157', '18020158', '18020159', '18020161',
+'18020162', '18020163', '18030001', '18030002', '18030003', '18030004', '18030005', '18030006', '18030007',
+'18030009', '18030010', '18030012', '18040001', '18040002','18040003', '18040006', '18040007',
+'18040008', '18040009', '18040010', '18040011', '18040012', '18040013', '18040014', '18040051')
+
+# Get general info about all gages in Central Valley HUCs from NWIS
+gage_info <- function(x) {
+  df <- fread(sprintf("https://waterservices.usgs.gov/nwis/site/?format=rdb&huc=%s&seriesCatalogOutput=true&siteStatus=all&hasDataTypeCd=dv,aw", x), check.names = FALSE, header=TRUE)
+}
+
+# Consolidate all files
+g <- do.call(rbind, lapply(hucs_all, gage_info))
+
+```
+
+####Gage criteria
+
+Even when the gage data criteria are set correctly, the amount of data retrieved might be off. Site 11201800, for instance, has a start date of of 1908-10-01 and an end date of 1995-09-04.  That qualifies under the criteria of at least 5 years of data after 1984.  But looking at the data reveals that there are only daily values recorded from 1908-1912, and then a few from 1994 onward.
+
+Site 11451720 supposedly has data from 1958 to present, but in fact it stops in 1980 before briefly picking up again for two weeks at the end of 1997. 
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+
+# ---------------------------------------------------------------------- #
+#### Stream gage - set criteria for gage selection ####
+# ---------------------------------------------------------------------- #
+
+# Format dates of data retrieval
+g$begin_date <- as.Date(g$begin_date, format = "%Y-%m-%d")
+g$end_date <- as.Date(g$end_date, format = "%Y-%m-%d")
+
+# Calculate active time for each gage
+g$time_active <- g$end_date - g$begin_date
+
+# Only get gages with >= 5 years of data after 1984
+# 'Difftime' reported in days but is unreliable as an indication of true data collection period
+g.sub <- subset(g, end_date > "1989-01-01" & time_active > 1800 & (parm_cd == '00060' | parm_cd == '00065'))
+
+# Get unique sites
+sites <- unique(g.sub$site_no)
+
+# Make sure site names have 8 characters; others aren't recognized in the automatic retrieval URL
+sites <- subset(sites, nchar(sites) == 8)
+
+# Make file with unique sites and corresponding HUC #
+site_info <- as.data.frame(g[, c('site_no', 'huc_cd')])
+site_info <- site_info[-1,]
+site_info <- unique(site_info[c("site_no", "huc_cd")])
+
+```
+
+
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE, include=FALSE}
+
+# ---------------------------------------------------------------------- #
+#### Stream gage - get data from selected sites ####
+# ---------------------------------------------------------------------- #
+
+# Set up holder for all site info  
+sg <- data.frame()
+
+# Get monthly info from identified stream gages
+for (site in sites) {
+
+  file.next <- fread(sprintf("https://waterservices.usgs.gov/nwis/stat/?format=rdb&sites=%s&statReportType=monthly&statTypeCd=all&missingData=on", site), check.names = FALSE, header=TRUE)
+
+  # Ignore no-data files, which start with #
+  if (file.next[1, 1] != "#") {
+      sg <- rbind(sg, file.next)
+  }
+}  
+
+```
+
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+
+# ---------------------------------------------------------------------- #
+#### Stream gage - process aggregated info ####
+# ---------------------------------------------------------------------- #
+
+# Data type values are defined here: https://waterservices.usgs.gov/rest/Site-Service.html#outputDataTypeCd
+# 00060 = discharge (cu ft/s)
+# 00065 = gage height (ft)
+
+# Remove invalid site #s
+sg <- sg[sg$site_no %in% sites, ]
+
+# Create date from year and month
+sg$date <- as.Date(with(sg, sprintf("%s-%02s-01", year_nu, month_nu)), "%Y-%m-%d")
+
+# Remove dates prior to 1984 and past Pekel data
+sg <- subset(sg, year_nu > 1983 & date < max(pk$date, na.rm = TRUE))
+
+# Ensure values are numbers
+sg$mean_va <- as.numeric(sg$mean_va)
+
+# Pare down dataset--this requires sg as a data frame
+sg <- data.frame(sg)
+cols_to_keep <- c("site_no", "parameter_cd", "mean_va", "date")
+sg <- sg[, cols_to_keep]
+
+# Restrict to gage height or discharge info only
+sg <- subset(sg, parameter_cd == '00065' | parameter_cd == "00060")
+
+# Replace parameter info
+sg[sg$parameter_cd == "00060", "parameter_cd"] <- "discharge"
+sg[sg$parameter_cd == "00065", "parameter_cd"] <- "gage ht"
+
+# Attribute sites with HUC#
+sg <- merge(sg, site_info, by = "site_no")
+colnames(sg)[which(colnames(sg) == "huc_cd")] <- "huc8"
+
+# Remove gages in which 
+# - all values are the same
+# - gage values are negative
+# - fewer than 5 years of overlapping data exist.  This is necessary b/c the start, end dates aren't necessarily accurate
+sg <- sg %>% 
+    group_by(site_no) %>%
+    filter(length(unique(mean_va)) > 1) %>%
+    filter(mean_va >= 0) %>% 
+    filter(n() > 60)
+
+# Assign factors
+sg$site_no <- as.factor(sg$site_no)
+sg$parameter_cd <- as.factor(sg$parameter_cd)
+sg$huc8 <- as.factor(sg$huc8)
+
+```
+
+
+
+```{r, echo=FALSE, warning=FALSE, include=FALSE}
+
+# ---------------------------------------------------------------------- #
+# Merge imagery and stream gage data across all HUCs####
+# ---------------------------------------------------------------------- #
+
+# Merge Pekel/DSWE and gage data by date. Rename sg HUC to avoid confusion between HUCs
+pk_ds_sg <-  sg %>% 
+   rename(huc8.sg = huc8) %>% 
+   right_join(pk_ds, by = c('date')) %>% 
+   rename(huc8.img = huc8)
+
+# Assign factors 
+pk_ds_sg <- pk_ds_sg %>%
+  ungroup(site_no) %>% 
+      mutate(huc8.img = factor(huc8.img), 
+             type = factor(type), 
+             site_no = factor(site_no),  # may need to ungroup this one
+             parameter_cd = factor(parameter_cd))
+
+# Delete extraneous columns
+pk_ds_sg <- pk_ds_sg %>% 
+            select(-c(nodata, notwater, sum, pct))
+
+# Assign tag for whether imagery water data is interpolated (Y) or original (N)
+pk_ds_sg$interp <- ifelse(is.na(pk_ds_sg$water), 'Y', 'N')
+pk_ds_sg$interp <- as.factor(pk_ds_sg$interp)
+```
+
+
+```{r, echo = FALSE}
+
+# ---------------------------------------------------------------------- #
+# save file of merged data ####
+# ---------------------------------------------------------------------- #
+
+save(pk_ds, pk, ds, pk_ds_sg, file = file.path(path.out, file.out))
+
+
+```
+
