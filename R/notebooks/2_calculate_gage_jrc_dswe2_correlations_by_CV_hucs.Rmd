@@ -63,8 +63,8 @@ nodata_threshold <- 5
 
 path.data <-  "E:/projects/place/data"
 
-file.in <- file.path(path.data, paste0("CV_dswe_jrc_data_", nodata_threshold, "_pct_nodata_merged.RData"))
-file.out <- paste0("CV_dswe_jrc_data_", nodata_threshold, "_pct_nodata_correlations.RData")
+file.in <- file.path(path.data, paste0("CV_dswe_jrc_gage_", nodata_threshold, "pct_nodata_merged.RData"))
+file.out <- paste0("CV_dswe_jrc_gage_", nodata_threshold, "pct_nodata_correlations.RData")
 
 
 # Set path to shapefile directory
@@ -91,8 +91,9 @@ load(file.in)
 # Calculate correlations between imagery and gages for all HUCs####
 # ---------------------------------------------------------------------- #
 
-
 # Calculate Pearson correlations based on reduced data set (i.e., NA water values are not yet interpolated)
+# n is the number of months on which the correlation is based
+
 pk_ds_sg.cor <- pk_ds_sg %>% 
 #  select(-c(water2, water3, water4)) %>% 
   group_by(huc8.img, site_no, type, parameter_cd, huc8.sg) %>% 
@@ -133,13 +134,14 @@ lm_fit <- function(f) {
 #ignore hucs in which all imagery values are NA
 pk_ds_sg.cor$b <- 0
 pk_ds_sg.cor$m <- 0
+
 # Start the clock
 start_time <- Sys.time()
 
-  pk_ds_sg.int <- pk_ds_sg.cor %>% 
+pk_ds_sg.int <- pk_ds_sg.cor %>% 
   group_by(huc8.img, site_no, type, parameter_cd, huc8.sg, cor) %>% 
   filter(sum(is.na(water)) != length(water)) %>%
-  filter(abs(cor) != 0.0) %>%  # 
+  filter(abs(cor) != 0.0) %>%  
   do(lm_fit(.))
 
 end_time <- Sys.time()
@@ -190,7 +192,7 @@ pk_ds_sg.int$water <- ifelse(is.na(pk_ds_sg.int$water), pk_ds_sg.int$mean_va * p
 
 # HUCs have to be numeric b/c they have different factor levels which kills comparisons
 pk_ds_sg.int <- pk_ds_sg.int %>%
-  ungroup(huc8) %>% 
+      ungroup(huc8) %>% 
       mutate(huc8.img = as.numeric(as.character(huc8.img)),
              huc8.sg = as.numeric(as.character(huc8.sg)),
              type = factor(type))
@@ -233,7 +235,7 @@ cor.all.max$same_huc[cor.all.max$huc8.img != cor.all.max$huc8.sg] <- 'N'
 # ---------------------------------------------------------------------- #
 
 # Select only uninterpolated DSWE values
-ds_sg <- subset(pk_ds_sg, type == 'dswe' & interp == 'N')
+ds_sg <- subset(pk_ds_sg.int, type == 'dswe' & interp == 'N')
 
 # rowSumming NA and 0 returns NA rather than 0. Setting it up like this returns 0 instead of NA.
 # Sum water plus class 2,3,4
@@ -250,13 +252,14 @@ ds_sg$waterplus24 <- rowSums(ds_sg[, c('water', 'water2', 'water4')], na.rm = TR
 ds_sg.cor <- ds_sg %>% 
   filter(!is.na(mean_va)) %>% 
   group_by(huc8.img, site_no, parameter_cd) %>% 
-  summarize(cor = cor(water, mean_va, use = "complete.obs", method = "pearson"),
-                   cor2 = cor(waterplus2, mean_va,use = "complete.obs", method = "pearson"),
-                   cor3 = cor(waterplus23, mean_va,use = "complete.obs", method = "pearson"),
-                   cor4 = cor(waterplus24, mean_va,use = "complete.obs", method = "pearson"),
+  summarize(cor1 = cor(water, mean_va, use = "complete.obs", method = "pearson"),
+                   cor12 = cor(waterplus2, mean_va,use = "complete.obs", method = "pearson"),
+                   cor123 = cor(waterplus23, mean_va,use = "complete.obs", method = "pearson"),
+                   cor124 = cor(waterplus24, mean_va,use = "complete.obs", method = "pearson"),
             n = sum(!is.na(water))) 
 
 ```
+
 
 
 ```{r, echo = FALSE}
@@ -265,7 +268,7 @@ ds_sg.cor <- ds_sg %>%
 # save file of merged data ####
 # ---------------------------------------------------------------------- #
 
-#save(cor.all.max, cor.huc.max, pk_ds, ds_sg, pk_ds_sg.int, file = file.path(path.data, file.out))
+save(cor.all.max, cor.huc.max, ds_sg.cor, pk_ds, pk_ds_sg.int, file = file.path(path.data, file.out))
 
 ```
 

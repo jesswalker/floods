@@ -60,7 +60,7 @@ nodata_threshold <- 5
 
 path.out <-  "E:/projects/place/data"
 
-file.out <- paste0("CV_dswe_jrc_data_", nodata_threshold, "_pct_nodata_merged.RData")
+file.out <- paste0("CV_dswe_jrc_gage_", nodata_threshold, "pct_nodata_merged.RData")
 
 
 ```

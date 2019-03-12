@@ -74,7 +74,7 @@ nodata_threshold <- 5
 #plots are saved to path.out/plots
 
 path.data <-  "E:/projects/place"
-file.in <- file.path(path.data, "data", paste0("CV_dswe_jrc_data_", nodata_threshold, "_pct_nodata_correlations.RData"))
+file.in <- file.path(path.data, "data", paste0("CV_dswe_jrc_gage_", nodata_threshold, "pct_nodata_correlations.RData"))
 
 # Set path to shapefile directory
 shp.dir <- file.path(path.data, "R", "shp")
@@ -185,12 +185,11 @@ The _highest_ Pearson correlations between monthly imagery data and monthly stre
 # Display correlation table for Pekel and DSWE vs stream gage = TABLE ####
 # ---------------------------------------------------------------------- # 
 
-#If the table rather than the plot is displayed, use Bolded values are > 0.5.
+#If the table rather than the plot is displayed, use olded values are > 0.5.
 
 maxes <- cor.huc.max %>%
-    select(huc8.img, site_no, parameter_cd, type, cor, -c(interp, n, b, m, huc8.sg)) %>% 
+    select(huc8.img, site_no, parameter_cd, type, cor, n, -c(huc8.sg)) %>% 
   #  group_by(huc8.img, type) %>%
- #   mutate(n = n()) %>% 
     slice(which.max(cor))
 
 maxes %>%
@@ -207,7 +206,7 @@ maxes %>%
 # Display correlations for Pekel and DSWE vs. stream gage - PLOT ####
 # ---------------------------------------------------------------------- #
 
-p <- ggplot(maxes, aes(x = reorder(huc8, -cor), y = cor, fill = type)) + 
+p <- ggplot(maxes, aes(x = reorder(huc8.img, -cor), y = cor, fill = type)) + 
        geom_bar(stat = 'identity', position = position_dodge()) +
        theme_bw() +
        theme(axis.text.x = element_text(angle = 80, hjust = 1),
@@ -238,11 +237,11 @@ JRC/Pekel correlations are stronger in almost all HUCs. HUC 18030004 is the only
 # ---------------------------------------------------------------------- #
 
 
-maxes.by.type <- cor_pdsg %>%
-    group_by(huc8) %>%
+maxes.by.type <- cor.huc.max %>%
+    group_by(huc8.img) %>%
     slice(which.max(cor))
 
-tmp <- merge(shp, maxes.by.type, by.x = 'HUC8', by.y = 'huc8')
+tmp <- merge(shp, maxes.by.type, by.x = 'HUC8', by.y = 'huc8.img')
 
 p <- ggplot(tmp) + 
      geom_sf(aes(fill = type)) +
@@ -262,13 +261,6 @@ p
 # ---------------------------------------------------------------------- #
 #### Spatial plot of # months available for each 'best' correlation ####
 # ---------------------------------------------------------------------- #
-
-
-maxes.by.type <- cor_pdsg %>%
-    group_by(huc8) %>%
-    slice(which.max(cor))
-
-tmp <- merge(shp, maxes.by.type, by.x = 'HUC8', by.y = 'huc8')
 
 n.max <- max(tmp$n)
 
@@ -303,11 +295,11 @@ cor_min <- maxes[order(maxes$cor), ][1, "cor"][[1]]
 pk_max <-  maxes[order(-maxes$cor), ][1, "type"][[1]]
 pk_min <-  maxes[order(-maxes$cor), ][1, "type"][[1]]
 
-huc_max <- maxes[order(-maxes$cor), ][1, "huc8"][[1]]
+huc_max <- maxes[order(-maxes$cor), ][1, "huc8.img"][[1]]
 
-huc_min <- maxes[order(maxes$cor), ][1, "huc8"][[1]]
+huc_min <- maxes[order(maxes$cor), ][1, "huc8.img"][[1]]
 
-sub_max <- subset(pk_ds_sg, site_no == site_max & type == pk_max)
+sub_max <- subset(pk_ds_sg.int, site_no == site_max & type == pk_max)
 
 ```
 ####Gage:imagery correlation across all HUCs  
@@ -317,22 +309,27 @@ Opening up the analysis to all gages, no matter what HUC they're in, reveals tha
 ```{r, echo = FALSE, warning = FALSE}
 
 # ---------------------------------------------------------------------- #
-#### DIsplay gage with max correlation in each HUC - ALL GAGES ####
+#### Display gage with max correlation in each HUC - ALL GAGES ####
 # ---------------------------------------------------------------------- #
 
 # Display table of correlations
-cor.all.sites %>% 
-  kable(col.names = c("HUC - imagery", "Gage w best correlation", "HUC - gage", "Data type", "r", 'Same HUC?','# times gage is best'), digits = 3) %>%  
-  kable_styling("striped", full_width = FALSE) %>%
-  row_spec(c(which(cor.all.sites$cor > 0.5)), bold = T) %>% 
-  row_spec(c(which(cor.all.sites$same_huc=='N')), color = "red")
 
-cor.all.sites <- data.frame(cor.all.sites)
+t <-  cor.all.max %>% 
+      group_by(huc8.img) %>%
+      slice(which.max(cor)) %>% 
+#%>% 
+  select(huc8.img, site_no, huc8.sg, type, cor, same_huc, n_site, -c(parameter_cd, n, b, m, interp, water2, water3, water4)) %>% 
+  kable(col.names = c("HUC - imagery", "Gage w best correlation", "HUC - gage", "Data type", "r", 'Same HUC?','# times gage is best'), digits = 3) %>%
+  kable_styling("striped", full_width = FALSE) %>%
+  row_spec(c(which(t$cor > 0.5)), bold = T) %>% 
+  row_spec(c(which(t$same_huc=='N')), color = "red")
+
+t
 ```
 
 
 
-The 'super gage' here is site `r as.character(cor.all.sites[which.max(cor.all.sites$n), 'site_no'])` in HUC `r as.character(cor.all.sites[which.max(cor.all.sites$n), 'huc8.y'])`
+The 'super gage' here is site `r as.character(cor.all.max[which.max(cor.all.max$n_site), 'site_no'])` in HUC `r as.character(cor.all.max[which.max(cor.all.max$n_site), 'huc8.sg'])`
 
 
 ####Super gage 
@@ -343,13 +340,13 @@ The 'super gage' here is site `r as.character(cor.all.sites[which.max(cor.all.si
 # ---------------------------------------------------------------------- #
 
 
-tmp <- merge(shp, cor.all.sites, by.x = 'HUC8', by.y = 'huc8.y')
+tmp <- merge(shp, cor.all.max, by.x = 'HUC8', by.y = 'huc8.sg')
 
 n.max <- max(tmp$n)
 huc.max <- tmp[tmp$n == 6, "HUC8"][[1]][1]
   
 p <- ggplot(tmp) + 
-     geom_sf(aes(fill = as.factor(n))) +
+     geom_sf(aes(fill = as.factor(n_site))) +
     geom_sf(data = shp, fill = NA, color = 'gray50', lwd = 0.4) +
      theme_bw() +
      coord_sf(crs = st_crs(26910)) # set UTM zone 10 projection
@@ -365,10 +362,11 @@ Gage discharge and "highest confidence" water extent generally have the highest 
 
 ```{r, echo = FALSE}
  
-cor_dsg %>%  
-    kable(col.names = c("HUC", "Site", "Data type", "Gage type", "r (w1)", "r (w1+w2)", "r (w1+w2+w3)", "r (w1+w2+w4)", "n"), digits = 3) %>%  
+ds_sg.cor %>%  
+ #   select(huc8.img, site_no, parameter_cd, cor1, cor12, cor123, cor124, n) %>% 
+    kable(col.names = c("HUC", "Site", "Gage type", "r (w1)", "r (w1+w2)", "r (w1+w2+w3)", "r (w1+w2+w4)", "n"), digits = 3) %>%  
     kable_styling("striped", full_width = FALSE) %>%
-    row_spec(c(which(cor_dsg$cor > 0.5)), bold = T)
+    row_spec(c(which(ds_sg.cor$cor1 > 0.5)), bold = T)
 ```
 
 
@@ -593,7 +591,6 @@ plot_function  <- function(max_cor) {
   ggsave(file = file.path(path.out, "plots", paste0("dswe_jrc_huc", huc_i, ".png")), 
         width = 7, 
         height = 5, 
-        units = "in", 
         dpi = 600)
 
 }
