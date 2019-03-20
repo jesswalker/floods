@@ -94,7 +94,7 @@ load(file.in)
 # Calculate Pearson correlations based on reduced data set (i.e., NA water values are not yet interpolated)
 # n is the number of months on which the correlation is based
 
-pk_ds_sg.cor <- pk_ds_sg %>% 
+pk_ds_sg.cor.all <- pk_ds_sg %>% 
 #  select(-c(water2, water3, water4)) %>% 
   group_by(huc8.img, site_no, type, parameter_cd, huc8.sg) %>% 
   #ungroup() %>% 
@@ -105,10 +105,38 @@ pk_ds_sg.cor <- pk_ds_sg %>%
 
 
 
+```{r, echo=FALSE, warning=FALSE, include=FALSE}
+
+# ---------------------------------------------------------------------- #
+# Restrict correlation file ####
+# ---------------------------------------------------------------------- #
+
+# Convert factor to number - otherwise factors trip up operation
+pk_ds_sg.cor.all <- pk_ds_sg.cor.all %>%
+      ungroup(huc8.img) %>% 
+      mutate(huc8.img = as.numeric(as.character(huc8.img)),
+             huc8.sg = as.numeric(as.character(huc8.sg)))
+
+# Take ALL correlations for rows where imagery HUC = stream gage HUC
+pk_ds_sg.cor.1 <- pk_ds_sg.cor.all %>% 
+  filter(huc8.img == huc8.sg)
+
+# Take ONLY the external stream gage with the highest correlation to each imagery HUC
+pk_ds_sg.cor.2 <- pk_ds_sg.cor.all %>%
+  filter(huc8.img != huc8.sg) %>% 
+  group_by(huc8.img, type) %>% 
+  filter(cor == max(cor)) 
+
+# Combine
+pk_ds_sg.cor <- bind_rows(pk_ds_sg.cor.1, pk_ds_sg.cor.2)
+```
+
+
+
 ```{r, echo=FALSE, message=FALSE, include=FALSE}
 
 # ---------------------------------------------------------------------- #
-#### Function: Get coefficients for each correlation ####
+#### Function: Get coefficients for each correlation for 1st order LR ####
 # ---------------------------------------------------------------------- #
 
 # Function to apply linear fit
@@ -124,6 +152,30 @@ lm_fit <- function(f) {
 }
 
 ```
+
+
+```{r, echo=FALSE, message=FALSE, include=FALSE}
+
+# ---------------------------------------------------------------------- #
+#### Function: Get coefficients for each correlation for 1st order LR ####
+# ---------------------------------------------------------------------- #
+
+# Function to apply linear fit
+lm_fit2 <- function(f){ T
+ # print(head(f))
+  fit <- lm(water ~ mean_va + I(mean_va^2), data = f)
+  results <- broom::tidy(fit)
+  f$b <- results$estimate[1]
+  f$m <- results$estimate[2]
+  f$m2 <- results$estimate[3]
+  f$r2 <- summary(fit)$r.squared
+
+  return(f)
+}
+
+```
+
+
 
 
 ```{r, echo = FALSE, message=FALSE, include=FALSE}
@@ -165,9 +217,10 @@ colnames(ds.sub)[2] <- 'water_ds'
 pk_ds.sub <- merge(pk.sub, ds.sub, by = c('date', 'huc8'))
 
 # Calculate correlations
-cor_pkds <- pk_ds.sub %>% 
-  dplyr::group_by(huc8) %>% 
-  dplyr::summarize(cor = cor(water_pk, water_ds, use = "complete.obs", method = "kendall"), 
+pk_ds.cor <- pk_ds.sub %>% 
+    group_by(huc8) %>% 
+    rename(huc8.img = huc8) %>% 
+    summarize(cor = cor(water_pk, water_ds, use = "pairwise.complete.obs", method = "kendall"), 
             n_pekel = sum(!is.na(water_pk)),
             n_dswe = sum(!is.na(water_ds))) # Used to look at correlation between data density and correlation
 
@@ -191,11 +244,11 @@ pk_ds_sg.int$water <- ifelse(is.na(pk_ds_sg.int$water), pk_ds_sg.int$mean_va * p
 # ---------------------------------------------------------------------- #
 
 # HUCs have to be numeric b/c they have different factor levels which kills comparisons
-pk_ds_sg.int <- pk_ds_sg.int %>%
-      ungroup(huc8) %>% 
-      mutate(huc8.img = as.numeric(as.character(huc8.img)),
-             huc8.sg = as.numeric(as.character(huc8.sg)),
-             type = factor(type))
+#pk_ds_sg.int <- pk_ds_sg.int %>%
+#      ungroup(huc8) %>% 
+#      mutate(huc8.img = as.numeric(as.character(huc8.img)),
+#             huc8.sg = as.numeric(as.character(huc8.sg)),
+#             type = factor(type))
 
 ```
 
@@ -210,7 +263,7 @@ pk_ds_sg.int <- pk_ds_sg.int %>%
 cor.huc.max <- pk_ds_sg.int %>% 
   filter(huc8.img == huc8.sg) %>% 
   group_by(huc8.img, type) %>% 
-  select(-c(date, water, interp, mean_va, b, m)) %>% 
+  select(-starts_with('water'), -c(date, interp, mean_va, b, m)) %>% 
   slice(which.max(cor))
 
 # Calculate max correlation for imagery given all possible gages
@@ -218,6 +271,7 @@ cor.all.max <- pk_ds_sg.int %>%
   group_by(huc8.img, type) %>% 
   slice(which.max(cor)) %>% 
   group_by(site_no) %>% 
+  select(-starts_with('water'), -c(date, interp, mean_va, b, m)) %>% 
   mutate(n_site = n()) # Get the number of times each gage appears
 
 # Are the gage and imagery in the same HC?
@@ -235,7 +289,8 @@ cor.all.max$same_huc[cor.all.max$huc8.img != cor.all.max$huc8.sg] <- 'N'
 # ---------------------------------------------------------------------- #
 
 # Select only uninterpolated DSWE values
-ds_sg <- subset(pk_ds_sg.int, type == 'dswe' & interp == 'N')
+ds_sg <- pk_ds_sg.int %>% 
+    filter(type == 'dswe' & interp == 'N')
 
 # rowSumming NA and 0 returns NA rather than 0. Setting it up like this returns 0 instead of NA.
 # Sum water plus class 2,3,4
@@ -251,7 +306,7 @@ ds_sg$waterplus24 <- rowSums(ds_sg[, c('water', 'water2', 'water4')], na.rm = TR
 # Calculate correlations
 ds_sg.cor <- ds_sg %>% 
   filter(!is.na(mean_va)) %>% 
-  group_by(huc8.img, site_no, parameter_cd) %>% 
+  group_by(huc8.img, site_no, huc8.sg, parameter_cd) %>% 
   summarize(cor1 = cor(water, mean_va, use = "complete.obs", method = "pearson"),
                    cor12 = cor(waterplus2, mean_va,use = "complete.obs", method = "pearson"),
                    cor123 = cor(waterplus23, mean_va,use = "complete.obs", method = "pearson"),
@@ -268,7 +323,7 @@ ds_sg.cor <- ds_sg %>%
 # save file of merged data ####
 # ---------------------------------------------------------------------- #
 
-save(cor.all.max, cor.huc.max, ds_sg.cor, pk_ds, pk_ds_sg.int, file = file.path(path.data, file.out))
+save(cor.all.max, cor.huc.max, pk_ds.cor, ds_sg.cor, pk_ds, pk_ds_sg.int, file = file.path(path.data, file.out))
 
 ```
 
