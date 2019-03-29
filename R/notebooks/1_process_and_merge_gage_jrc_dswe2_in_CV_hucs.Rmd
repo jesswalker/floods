@@ -253,12 +253,12 @@ hucs_all <- c('18020002', '18020003','18020004', '18020005', '18020104', '180201
 '18040008', '18040009', '18040010', '18040011', '18040012', '18040013', '18040014', '18040051')
 
 # Get general info about all gages in Central Valley HUCs from NWIS
-gage_info <- function(x) {
+site_info <- function(x) {
   df <- fread(sprintf("https://waterservices.usgs.gov/nwis/site/?format=rdb&huc=%s&seriesCatalogOutput=true&siteStatus=all&hasDataTypeCd=dv,aw", x), check.names = FALSE, header=TRUE)
 }
 
 # Consolidate all files
-g <- do.call(rbind, lapply(hucs_all, gage_info))
+g <- do.call(rbind, lapply(hucs_all, site_info))
 
 ```
 
@@ -291,12 +291,15 @@ sites <- unique(g.sub$site_no)
 # Make sure site names have 8 characters; others aren't recognized in the automatic retrieval URL
 sites <- subset(sites, nchar(sites) == 8)
 
-# Make file with unique sites and corresponding HUC #
-gage_info <- as.data.frame(g[, c('site_no', 'huc_cd', 'dec_lat_va', 'dec_long_va')])
-gage_info <- gage_info[-1,]
-gage_info <- unique(gage_info[c("site_no", "huc_cd",  'dec_lat_va', 'dec_long_va')])
-gage_info <- gage_info %>% 
-  rename(lat = dec_lat_va, lon = dec_long_va) %>% 
+# Make file of info specific to each site: #, HUC#, lat, lon
+site_info <- g %>% 
+  select(site_no,           # keep select columns; rename
+         huc8.sg = huc_cd, 
+         lat = dec_lat_va, 
+         lon = dec_long_va) %>% 
+  as.data.frame(.) %>%      # change to data frame
+  slice(-1) %>%             # remove nonsense 1st row
+  distinct() %>%            # keep unique rows only
   mutate(lat = as.numeric(lat), 
          lon = as.numeric(lon))
   
@@ -347,23 +350,18 @@ sg$date <- as.Date(with(sg, sprintf("%s-%02s-01", year_nu, month_nu)), "%Y-%m-%d
 # Remove dates prior to 1984 and past Pekel data
 sg <- subset(sg, year_nu > 1983 & date < max(pk$date, na.rm = TRUE))
 
-# Ensure values are numbers
-sg$mean_va <- as.numeric(sg$mean_va)
-
-# Pare down dataset--this requires sg as a data frame
-sg <- data.frame(sg)
-cols_to_keep <- c("site_no", "parameter_cd", "mean_va", "date")
-sg <- sg[, cols_to_keep]
-
-# Restrict to discharge info only
-sg <- subset(sg, parameter_cd == "00060")
+# Ensure values are numbers; pare down to discharge only
+sg <-  sg %>% 
+  mutate(mean_va = as.numeric(mean_va)) %>% 
+  select(site_no, parameter_cd, mean_va, date) %>% 
+  filter(parameter_cd == "00060")
 
 # Replace parameter info
 sg[sg$parameter_cd == "00060", "parameter_cd"] <- "discharge"
 
-# Attribute sites with HUC#
-sg <- merge(sg, gage_info, by = "site_no")
-colnames(sg)[which(colnames(sg) == "huc_cd")] <- "huc8"
+# Attribute sites with HUC#, lat, lon
+sg <-  sg %>% 
+  left_join(site_info, by = "site_no")
 
 # Remove gages in which 
 # - all values are the same
@@ -371,14 +369,13 @@ colnames(sg)[which(colnames(sg) == "huc_cd")] <- "huc8"
 # - fewer than 5 years of overlapping data exist.  This is necessary b/c the start, end dates aren't necessarily accurate
 sg <- sg %>% 
     group_by(site_no) %>%
-    filter(length(unique(mean_va)) > 1) %>%
-    filter(mean_va >= 0) %>% 
-    filter(n() > 60)
-
-# Assign factors
-sg$site_no <- as.factor(sg$site_no)
-sg$parameter_cd <- as.factor(sg$parameter_cd)
-sg$huc8 <- as.factor(sg$huc8)
+      filter(length(unique(mean_va)) > 1) %>%
+      filter(mean_va >= 0) %>% 
+      filter(n() > 60) %>% 
+    ungroup() %>% 
+    mutate(site_no = factor(site_no),
+         parameter_cd = factor(parameter_cd),
+         huc8.sg = factor(huc8.sg))
 
 ```
 
@@ -392,13 +389,11 @@ sg$huc8 <- as.factor(sg$huc8)
 
 # Merge Pekel/DSWE and gage data by date. Rename sg HUC to avoid confusion between HUCs
 pk_ds_sg <-  sg %>% 
-   rename(huc8.sg = huc8) %>% 
    right_join(pk_ds, by = c('date')) %>% 
    rename(huc8.img = huc8)
 
-# Assign factors 
+# Assign factors
 pk_ds_sg <- pk_ds_sg %>%
-  ungroup(site_no) %>% 
       mutate(huc8.img = factor(huc8.img), 
              type = factor(type), 
              site_no = factor(site_no),  # may need to ungroup this one
