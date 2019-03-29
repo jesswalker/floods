@@ -66,7 +66,7 @@ file.out <- paste0("CV_dswe_jrc_gage_", nodata_threshold, "pct_nodata_merged.RDa
 ```
 ####Steps  
 
-  - JRC/Pekel and DSWE 2.0 monthly composites within all Central Valley HUCs retrieved from online Google Drive account
+  - JRC and DSWE 2.0 monthly composites within all Central Valley HUCs retrieved from online Google Drive account
     - Both files processed to convert values, standardize names, etc. 
     - In scenes with > **`r nodata_threshold`%** No Data, the water values are zeroed out pending later interpolation
   - Metadata retrieved from NWIS for all gages in Central Valley
@@ -292,9 +292,14 @@ sites <- unique(g.sub$site_no)
 sites <- subset(sites, nchar(sites) == 8)
 
 # Make file with unique sites and corresponding HUC #
-site_info <- as.data.frame(g[, c('site_no', 'huc_cd')])
-site_info <- site_info[-1,]
-site_info <- unique(site_info[c("site_no", "huc_cd")])
+gage_info <- as.data.frame(g[, c('site_no', 'huc_cd', 'dec_lat_va', 'dec_long_va')])
+gage_info <- gage_info[-1,]
+gage_info <- unique(gage_info[c("site_no", "huc_cd",  'dec_lat_va', 'dec_long_va')])
+gage_info <- gage_info %>% 
+  rename(lat = dec_lat_va, lon = dec_long_va) %>% 
+  mutate(lat = as.numeric(lat), 
+         lon = as.numeric(lon))
+  
 
 ```
 
@@ -350,16 +355,14 @@ sg <- data.frame(sg)
 cols_to_keep <- c("site_no", "parameter_cd", "mean_va", "date")
 sg <- sg[, cols_to_keep]
 
-# Restrict to gage height or discharge info only
-#sg <- subset(sg, parameter_cd == '00065' | parameter_cd == "00060")
+# Restrict to discharge info only
 sg <- subset(sg, parameter_cd == "00060")
 
 # Replace parameter info
 sg[sg$parameter_cd == "00060", "parameter_cd"] <- "discharge"
-#sg[sg$parameter_cd == "00065", "parameter_cd"] <- "gage ht"
 
 # Attribute sites with HUC#
-sg <- merge(sg, site_info, by = "site_no")
+sg <- merge(sg, gage_info, by = "site_no")
 colnames(sg)[which(colnames(sg) == "huc_cd")] <- "huc8"
 
 # Remove gages in which 
