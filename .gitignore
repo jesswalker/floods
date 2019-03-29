@@ -6,7 +6,10 @@ data/
 docs/
 gis/
 output/
+plots/
+plots1/
 graphics/
 R/shp
 place.Rproj
 README.md
+R/notebooks/*.n☺b.html
