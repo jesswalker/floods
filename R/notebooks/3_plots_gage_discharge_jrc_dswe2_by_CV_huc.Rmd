@@ -52,6 +52,20 @@ Sys.setenv("plotly_username"= "jjwalker")
 Sys.setenv("plotly_api_key"="KXnTHoAperT2jUBO89Xr")
 ```
 
+
+```{r, echo=FALSE}
+
+# ---------------------------------------------------------------------- #
+#### Set correlation threshold ####
+# ---------------------------------------------------------------------- #
+
+# Identifies threshold between good and bad correlations
+
+cor_threshold <- 0.7
+
+```
+
+
 ```{r, echo=FALSE}
 
 # ---------------------------------------------------------------------- #
@@ -65,7 +79,7 @@ nodata_threshold <- 5
 ```
 
 
-```{r, include = F, results = 'hide'}
+```{r, echo = FALSE, include = F, results = 'hide'}
 
 # ---------------------------------------------------------------------- #
 #### Set files and folders ####
@@ -74,7 +88,7 @@ nodata_threshold <- 5
 #plots are saved to path.out/plots
 
 path.data <-  "E:/projects/place"
-file.in <- file.path(path.data, "data", paste0("CV_dswe_jrc_gage_", nodata_threshold, "pct_nodata_correlations.RData"))
+file.in <- file.path(path.data, "data", paste0("CV_dswe_jrc_gage_", nodata_threshold, "pct_nodata_correlations_pearson.RData"))
 
 # Set path to shapefile directory
 shp.dir <- file.path(path.data, "R", "shp")
@@ -94,28 +108,31 @@ load(file.in)
 ```
  
 
-```{r, echo = FALSE, message = FALSE, include= FALSE}
+```{r, echo = FALSE, message = FALSE, include = FALSE}
 
 # ---------------------------------------------------------------------- #
 #### Download HUC GIS data from Google Drive ####
 # ---------------------------------------------------------------------- #
 
-# HUCs
-filename <- 'WBDHU8_Central_Valley_UTMz10.shp'
-data_url = "1_2JnwZFS0blok23-9O7lw-o7Hk96E-nc" 
-download.file(sprintf("https://docs.google.com/uc?id=%s&export=download", data_url), destfile = file.path(shp.dir, "huc.zip"), mode='wb')
-unzip(zipfile = file.path(shp.dir, 'huc.zip'), exdir = shp.dir)
-file.remove(file.path(shp.dir, 'huc.zip'))
+# Download the shapefile if it doesn't exist
+  shp.name <- 'WBDHU8_Central_Valley_UTMz10.shp'
 
-shp <- st_read(dsn = file.path(shp.dir, filename), stringsAsFactors = F)
+if (!file.exists(file.path(shp.dir, shp.name))) {
+  data_url = "1_2JnwZFS0blok23-9O7lw-o7Hk96E-nc" 
+  download.file(sprintf("https://docs.google.com/uc?id=%s&export=download", data_url), destfile = file.path(shp.dir, "huc.zip"), mode='wb')
+  unzip(zipfile = file.path(shp.dir, 'huc.zip'), exdir = shp.dir)
+  file.remove(file.path(shp.dir, 'huc.zip'))
+}
+
+shp <- st_read(dsn = file.path(shp.dir, shp.name), stringsAsFactors = F)
+
 ```
-
 
 
 ####Background
 
   - Script **process_gage_discharge_pekel_dswe2_correlations_by_CV_huc.Rmd** must be run prior to this script
-  - File of JRC (Pekel), DSWE, and stream gage monthly values is retrieved
+  - File of JRC, DSWE, and stream gage monthly values is retrieved
 
   
   <br>
@@ -169,7 +186,7 @@ ggplot(pk_ds_season, aes(season, pct, color = type)) +
   theme_bw() +
   theme(axis.title.x = element_blank()) + 
   ylab("% NoData pixels") +
-  scale_color_discrete(name = "Dataset")
+  scale_color_discrete(name = "Dataset", breaks = c("dswe", "pekel"), labels = c("DSWE", "JRC"))
 ```
 
 
@@ -183,45 +200,124 @@ The _highest_ Pearson correlations between monthly imagery data and monthly stre
 # Display correlation table for Pekel and DSWE vs stream gage = TABLE ####
 # ---------------------------------------------------------------------- # 
 
-#If the table rather than the plot is displayed, use bolded values are > 0.5.
+#If the table rather than the plot is displayed, use bolded values are > 0.7.
 
  cor.huc.max %>%
      select(huc8.img, site_no, parameter_cd, type, cor, n) %>% 
      kable(col.names = c("HUC", "Gage", "Gage type", "Data type", "r", "# months of data"), digits = 3) %>%  
      kable_styling("striped", full_width = FALSE) %>%
-     row_spec(c(which(cor.huc.max$cor > 0.5)), bold = T) 
+     row_spec(c(which(cor.huc.max$cor > cor_threshold)), bold = T) 
 ```
 
-####Summary of results for correlations greater than 0.7
+####Summary of results for correlations greater than threshold `r cor_threshold`
 
 ```{r, echo = FALSE}
 
 cor.huc.max %>% 
   group_by(type) %>%
-  filter(cor > 0.7) %>% 
+  filter(cor > cor_threshold) %>% 
   summarize(n = n(),
-            mean = mean(cor),
-            med = median(cor),
             pct = n/49*100) %>% 
 
- kable(col.names = c("Type", "n", "Mean r", "Median r", "% of HUCs"), digits = 3) %>%  
-     kable_styling("striped", full_width = FALSE)  
+ kable(col.names = c("Type", "n", "% of HUCs"), digits = 1) %>%  
+     kable_styling("striped", full_width = FALSE, position = 'left')  
 ```
 
+####Overall number of gages
+```{r, echo = FALSE}
+
+
+pk_ds_sg.int %>%
+  ungroup() %>% 
+  summarize(n_all = n_distinct(site_no)) %>% 
+  
+   kable(col.names = c("# of gages")) %>%  
+     kable_styling("striped", full_width = FALSE, position = 'left') 
+
+
+
+```
+####Number of gages under correlation threshold
+
+```{r, echo = FALSE}
+
+
+# --------------------------------------------------------
+# Number of within-HUC correlations above threshold ####
+# --------------------------------------------------------
+
+pk_ds_sg.int %>%
+  filter(huc8.img == huc8.sg) %>% 
+  group_by(type) %>% 
+  distinct(huc8.img, cor) %>%
+  filter(cor > cor_threshold) %>% 
+  summarise(n = n()) %>% 
+    
+   kable(col.names = c("Dataset", "n > threshold")) %>%  
+     kable_styling("striped", full_width = FALSE, position = 'left') 
+            
+
+```
+
+####Range of maximum correlations over all HUCs
+
+```{r, echo = FALSE}
+# ---------------------------------------------------------------------- #
+# Correlation range for MAX Pekel and DSWE vs. stream gage ####
+# ---------------------------------------------------------------------- #
+
+cor.huc.max %>%
+  group_by(type) %>% 
+  summarise(min_cor = min(abs(cor)),
+            max_cor = max(cor)) %>% 
+  kable(col.names = c("Dataset", "Min", "Max"), digits = 3) %>%  
+  kable_styling("striped", full_width = FALSE, position = 'left') 
+
+
+
+```
+
+
+####Correlation range in individual HUCs and number of gages
+```{r, echo = FALSE}
+# ---------------------------------------------------------------------- #
+# Correlation range for individual HUCSs ####
+# ---------------------------------------------------------------------- #
+
+pk_ds_sg.int %>%
+  filter(huc8.img == huc8.sg) %>% 
+  distinct(cor, huc8.img, type)  %>% 
+  group_by(huc8.img, type) %>% 
+  summarise(min_cor = min(abs(cor)),
+            max_cor = max(cor),
+            n = n()) %>% 
+  kable(col.names = c("Dataset", "HUC", "Min", "Max", "# gages"), digits = 3) %>%  
+  kable_styling("striped", full_width = FALSE, position = 'left') 
+
+
+```
+
+
+####Maximum within-gage correlations for DSWE and JRC
 ```{r, echo = FALSE, warning=FALSE,  fig.width=8, fig.height=6}
 
 # ---------------------------------------------------------------------- #
-# Display correlations for Pekel and DSWE vs. stream gage - PLOT ####
+# Correlations for JRC and DSWE vs. stream gage - PLOT ####
 # ---------------------------------------------------------------------- #
 
 p <- ggplot(cor.huc.max, aes(x = reorder(huc8.img, -cor), y = cor, fill = type)) + 
        geom_bar(stat = 'identity', position = position_dodge()) +
+       geom_abline(slope = 0, intercept = cor_threshold, col = "black", lty = 2) +
        theme_bw() +
        theme(axis.text.x = element_text(angle = 80, hjust = 1),
              legend.title = element_blank()) +
-  xlab('HUC') +
-  ylab('Correlation') #+
-#  scale_fill_discrete(name = "Dataset")
+       xlab('HUC') +
+       ylab('Correlation') +
+       scale_fill_manual(name = "Dataset", 
+                    values = c('#F8766D', '#00BFC4'), 
+                 #   values = c('orange', 'lightblue'),
+                    breaks = c("dswe", "pekel"),
+                    labels = c("DSWE", "JRC"))
 
 ggplotly(p, tooltip = c('huc8', 'cor')) %>% 
   add_annotations(text="Dataset", xref="paper", yref="paper",
@@ -234,9 +330,9 @@ ggplotly(p, tooltip = c('huc8', 'cor')) %>%
 ```
 
 
-####Where DSWE or JRC/Pekel has a better correlation
+####Where DSWE or JRC has a better correlation
 
-JRC/Pekel correlations are stronger in almost all HUCs. HUC 18030004 is the only HUC in which no gage matched the requirement of having at least 5 years of overlapping data with the imagery time series. 
+JRC correlations are stronger in almost all HUCs. HUC 18030004 is the only HUC in which no gage matched the requirement of having at least 5 years of overlapping data with the imagery time series. 
 
 ```{r, echo = FALSE}
 
@@ -253,10 +349,12 @@ tmp <- merge(shp, maxes.by.type, by.x = 'HUC8', by.y = 'huc8.img')
 p <- ggplot(tmp) + 
      geom_sf(aes(fill = type)) +
      theme_bw() +
-       scale_fill_manual(name = "Imagery with higher correlation", values= c('orange', 'lightblue'), labels = c('DSWE', "JRC/Pekel")) +
+       scale_fill_manual(name = "Imagery with higher\ncorrelation", 
+                         #values= c('orange', 'lightblue'), 
+                         values = c('#F8766D', '#00BFC4'), 
+                         labels = c('DSWE', "JRC")) +
      coord_sf(crs = st_crs(26910)) # set UTM zone 10 projection
 p
-
 
 
 ```
@@ -284,31 +382,6 @@ p
 #chart_link
 ```
 
-
-```{r, echo = FALSE}
-
-# ---------------------------------------------------------------------- #
-#### Get gage with max correlation in each HUC ####
-# ---------------------------------------------------------------------- #
-
-# Looks at gages within HUCs
-# 
-# site_max <- maxes[order(-maxes$cor), ][1, "site_no"][[1]]
-# site_min <- maxes[order(maxes$cor), ][1, "site_no"][[1]]
-# 
-# cor_max <- maxes[order(-maxes$cor), ][1, "cor"][[1]]
-# cor_min <- maxes[order(maxes$cor), ][1, "cor"][[1]]
-# 
-# pk_max <-  maxes[order(-maxes$cor), ][1, "type"][[1]]
-# pk_min <-  maxes[order(-maxes$cor), ][1, "type"][[1]]
-# 
-# huc_max <- maxes[order(-maxes$cor), ][1, "huc8.img"][[1]]
-# 
-# huc_min <- maxes[order(maxes$cor), ][1, "huc8.img"][[1]]
-# 
-# sub_max <- subset(pk_ds_sg.int, site_no == site_max & type == pk_max)
-
-```
 ####Gage:imagery correlation across all HUCs  
 
 Opening up the analysis to all gages, no matter what HUC they're in, reveals that the majority of imagery datasets have a stronger correlation with a gage that is outside that particular HUC (in red). 
@@ -319,19 +392,19 @@ Opening up the analysis to all gages, no matter what HUC they're in, reveals tha
 #### Display gage with max correlation in each HUC - ALL GAGES ####
 # ---------------------------------------------------------------------- #
 
-# Display table of correlations
+# cor.all.max has the maximum within-huc correlation and the maximum outside-huc correlation for each HUC
 
 
 t <- cor.all.max %>% 
-  group_by(huc8.img) %>%
+  group_by(huc8.img, type) %>%
   slice(which.max(cor)) %>% 
   select(huc8.img, site_no, huc8.sg, type, cor, same_huc, n_site)
 
-# Breaking it up like this is necessary b/c kable can't handle the fact that cor.all.max has changed ('select')
+# Breaking it up like this is necessary b/c kable can't handle the fact that cor.all.max has changed ('select' messes it up)
 t %>% 
   kable(col.names = c("HUC - imagery", "Gage w best correlation", "HUC - gage", "Data type", "r", 'Same HUC?','# times gage is best'), digits = 3) %>%
-  kable_styling("striped", full_width = FALSE) %>%
-  row_spec(c(which(t$cor > 0.5)), bold = T) %>%
+  kable_styling("striped", full_width = FALSE, position = 'left') %>%
+  row_spec(c(which(t$cor > cor_threshold)), bold = T) %>%
   row_spec(c(which(t$same_huc == 'N')), color = "red")
 
 ```
@@ -345,24 +418,68 @@ The 'super gage' here is site `r as.character(cor.all.max[which.max(cor.all.max$
 ```{r, echo = FALSE}
 
 # ---------------------------------------------------------------------- #
-#### Spatial plot of super gage correlations ####
+#### Spatial plot of super gage correlation ####
 # ---------------------------------------------------------------------- #
 
-
+# Get the correlation data into the shapefile
 tmp <- merge(shp, cor.all.max, by.x = 'HUC8', by.y = 'huc8.sg')
 
-n.max <- max(tmp$n)
-huc.max <- tmp[tmp$n == 6, "HUC8"][[1]][1]
-  
-p <- ggplot(tmp) + 
-     geom_sf(aes(fill = as.factor(n_site))) +
-    geom_sf(data = shp, fill = NA, color = 'gray50', lwd = 0.4) +
-     theme_bw() +
-     coord_sf(crs = st_crs(26910)) # set UTM zone 10 projection
-p
+# Get the site coordinates
+site_coords <- cor.all.max %>% 
+               select(site_no, lat,lon, n_site)
+site_coords <- site_coords[complete.cases(site_coords),]
+coordinates(site_coords) <-  c('lon', 'lat')
+
+# Transform shp polygons to match WGS84 lat/lon coords
+proj4string(site_coords) <- CRS("+init=epsg:4326")
+shp_4326 <- st_transform(shp, '+init=epsg:4326')
+tmp_4326 <- st_transform(tmp, '+init=epsg:4326')
+
+# Get hucs that use the super gage
+super_hucs <- unique(as.data.frame(tmp[tmp$n_site ==5, ])['huc8.img'])
+super_hucs$huc8.img <- as.character(super_hucs$huc8.img)
+t <- shp_4326 %>% 
+     right_join(super_hucs, by = c("HUC8" = 'huc8.img'))
+
+# Plot super gages
+ggplot() + 
+  geom_sf(data = t, fill = 'red', color = 'gray50', lwd = 0.4)  +
+     geom_sf(data = shp_4326, fill = NA, color = 'gray50', lwd = 0.4) +
+  #   geom_sf(data = subset(tmp_4326, n_site == 5), aes(fill = as.factor(n_site))) +
+     geom_point(data = subset(site_coords, n_site > 4), aes(x = lon, y = lat), color = "black", shape = 18, size = 6) + 
+  theme_bw()
 
 
 ```
+
+
+####Maximum correlations for DSWE and JRC allowing gages in any HUC
+```{r, echo = FALSE}
+
+p <- ggplot(t, aes(x = reorder(huc8.img, -cor), y = cor, fill = type)) + 
+       geom_bar(stat = 'identity', position = position_dodge()) +
+       geom_abline(slope = 0, intercept = cor_threshold, col = "black", lty = 2) +
+       theme_bw() +
+       theme(axis.text.x = element_text(angle = 80, hjust = 1),
+             legend.title = element_blank()) +
+       xlab('HUC') +
+       ylab('Correlation') +
+       scale_fill_manual(name = "Dataset", 
+                    values = c('#F8766D', '#00BFC4'), 
+                #   values = c('orange', 'lightblue'),
+                    breaks = c("dswe", "pekel"),
+                    labels = c("DSWE", "JRC"))
+
+
+ggplotly(p, tooltip = c('huc8', 'cor')) %>% 
+  add_annotations(text = "Dataset", xref = "paper", yref = "paper",
+                  x=1.02, xanchor="left",
+                  y=0.8, yanchor="bottom",   
+                  legendtitle = TRUE, 
+                  showarrow = FALSE) %>%
+  layout(legend = list(y = 0.8, yanchor = "top"))
+```
+
 
 
 ####Correlations between DSWE water categories and gage discharge
@@ -373,14 +490,12 @@ This is all gages within each HUC; no maxes.  Gage discharge and "highest confid
  
 ds_sg.cor %>% 
       ungroup(huc8.sg) %>% 
-      select(huc8.img, site_no, parameter_cd, cor1, cor12, cor123, cor124, n) %>% #, -huc8.sg)
-      kable(col.names = c("HUC", "Site", "Gage type", "r (w1)", "r (w1+w2)", "r (w1+w2+w3)", "r (w1+w2+w4)", "n"), digits = 3) %>%  
-      kable_styling("striped", full_width = FALSE)%>%
-      row_spec(c(which(ds_sg.cor$cor1 > 0.5)), bold = T)
+      select(huc8.img, site_no, parameter_cd, cor1, cor2, cor12, cor123, cor1234, n) %>% #, -huc8.sg)
+      kable(col.names = c("HUC", "Site", "Gage type", "r (w1)", "r (w2)", "r (w1+w2)", "r (w1+w2+w3)", "r (w1+w2+w3+w4)", "n"), digits = 3) %>%  
+      kable_styling("striped", full_width = FALSE, position = 'left') %>%
+      row_spec(c(which(ds_sg.cor$cor1 > cor_threshold)), bold = T)
 
 ```
-
-
 
 
 ####Pekel vs. DSWE correlation
@@ -389,12 +504,12 @@ How well do DSWE and JRC/Pekel agree?
 
 
 
-####Correlations - JRC/Pekel vs. DSWE
+####Correlations - JRC vs. DSWE
 
 ```{r, echo = FALSE}
 
 # ---------------------------------------------------------------------- #
-#### Spatial plot of Pekel/DSWE correlations ####
+#### Spatial plot of JRC/DSWE correlations ####
 # ---------------------------------------------------------------------- #
 
 tmp <- merge(shp, pk_ds.cor, by.x = 'HUC8', by.y = 'huc8.img')
@@ -415,7 +530,7 @@ ggplot(tmp) +
 
 # Get the max for DSWE by HUC
 
-  tmp2 <- merge(shp, cor.huc.max[cor.huc.max$type == 'dswe',], by.x = 'HUC8', by.y = 'huc8.img')
+  tmp2 <- merge(shp, cor.huc.max[cor.huc.max$type == 'dswe', ], by.x = 'HUC8', by.y = 'huc8.img')
 
   ggplot(tmp2) + 
      geom_sf(aes(fill = cor)) +
@@ -426,14 +541,14 @@ ggplot(tmp) +
 ```
 
 
-####Correlations - Pekel vs. gage
+####Correlations - JRC vs. gage
 ```{r, echo = FALSE}
 
 # ---------------------------------------------------------------------- #
-#### Spatial plot of Pekel/gage correlations ####
+#### Spatial plot of JRC/gage correlations ####
 # ---------------------------------------------------------------------- #
 
-tmp2 <- merge(shp, cor.huc.max[cor.huc.max$type == 'pekel',], by.x = 'HUC8', by.y = 'huc8.img')
+tmp2 <- merge(shp, cor.huc.max[cor.huc.max$type == 'pekel', ], by.x = 'HUC8', by.y = 'huc8.img')
 
 ggplot(tmp2) + 
      geom_sf(aes(fill = cor)) +
@@ -564,15 +679,15 @@ plot_function  <- function(max_cor) {
  
 # change names
 # thanks, ttps://stackoverflow.com/questions/3472980/ggplot-how-to-change-facet-labels
-  imagery.names <-  list('dswe'= "DSWE", 'pekel' = 'JRC/Pekel')
+  imagery.names <-  list('dswe'= "DSWE", 'pekel' = 'JRC')
   imagery_labeller <- function(variable, value){
     return(imagery.names[value])}
 
 # Plot
-  p <- ggplot(pk_ds_sg.all, aes(date, water, group = type)) + 
+  p <- ggplot(pk_ds_sg.all, aes(date, water, group = type)) +  # all
         geom_line(size = .3, color = 'black') +
         geom_line(data = pk_ds_sg.int, aes(date, water), color = 'red', size = .8) +
-        geom_point(data = pk_ds_sg.all, aes(date, water, color = interp), size = 0.6) +
+        geom_point(data = pk_ds_sg.all, aes(date, water, color = interp), size = 0.6) +  #all
         scale_color_manual(values = c("black", "red"), labels = c("Measured data", "Estimated data")) + 
         theme_bw() +
     #    annotate("text", x = as.Date(plot.x.max - 300, '%Y-%m-%d'), y = plot.y.max, label = paste0(km2, " km2")) +
