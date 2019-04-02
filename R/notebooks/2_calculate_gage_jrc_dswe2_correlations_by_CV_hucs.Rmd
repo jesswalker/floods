@@ -52,6 +52,8 @@ knitr::opts_chunk$set(echo = FALSE)
 
 nodata_threshold <- 5
 
+cor_type <- 'spearman' #pearson' #'kendall' # 'pearson'
+
 ```
 
 
@@ -66,7 +68,7 @@ path.data <-  "E:/projects/place/data"
 file.in <- file.path(path.data, paste0("CV_dswe_jrc_gage_", nodata_threshold, "pct_nodata_merged.RData"))
 
 # Out file specifies correlation test
-file.out <- paste0("CV_dswe_jrc_gage_", nodata_threshold, "pct_nodata_correlations_kendall.RData")
+file.out <- paste0("CV_dswe_jrc_gage_", nodata_threshold, 'pct_nodata_correlations_', cor_type, ".RData")
 
 ```
 
@@ -88,12 +90,12 @@ load(file.in)
 # Calculate correlations between imagery and gages for all HUCs####
 # ---------------------------------------------------------------------- #
 
-# Calculate kendall correlations based on reduced data set (i.e., NA water values are not yet interpolated)
+# Calculate correlations based on reduced data set (i.e., NA water values are not yet interpolated)
 # n is the number of months on which the correlation is based
 
-pk_ds_sg.cor.all1 <- pk_ds_sg %>% 
+pk_ds_sg.cor.all <- pk_ds_sg %>% 
   group_by(huc8.img, site_no, type) %>% 
-  mutate(cor = cor(water, mean_va, use = "pairwise.complete.obs", method = "kendall"),
+  mutate(cor = cor(water, mean_va, use = "pairwise.complete.obs", method = cor_type),
             n = sum(!is.na(water))) 
 
 ```
@@ -240,7 +242,7 @@ pk_ds.sub <- merge(pk.sub, ds.sub, by = c('date', 'huc8'))
 pk_ds.cor <- pk_ds.sub %>% 
     group_by(huc8) %>% 
     rename(huc8.img = huc8) %>% 
-    summarize(cor = cor(water_pk, water_ds, use = "pairwise.complete.obs", method = "kendall"), 
+    summarize(cor = cor(water_pk, water_ds, use = "pairwise.complete.obs", method = cor_type), 
             n_pekel = sum(!is.na(water_pk)),
             n_dswe = sum(!is.na(water_ds))) # Used to look at correlation between data density and correlation
 
@@ -281,7 +283,8 @@ cor.all.max <- pk_ds_sg.int %>%
   slice(which.max(cor)) %>% 
   group_by(site_no) %>% 
   select(-starts_with('water'), -c(date, interp, mean_va, b, m)) %>% 
-  mutate(n_site = n()) # Get the number of times each gage appears
+  mutate(n_site = n_distinct(huc8.img)) %>%  # Get the number of times each gage appears
+  ungroup()
 
 # Are the gage and imagery in the same HC?
 cor.all.max$same_huc <- NA
@@ -316,11 +319,11 @@ ds_sg$waterplus24 <- rowSums(ds_sg[, c('water', 'water2', 'water3', 'water4')], 
 ds_sg.cor <- ds_sg %>% 
   filter(!is.na(mean_va)) %>% 
   group_by(huc8.img, site_no, huc8.sg, parameter_cd) %>% 
-  summarize(cor1 = cor(water, mean_va, use = "complete.obs", method = "kendall"),
-                   cor2 = cor(water2, mean_va,use = "complete.obs", method = "kendall"),
-                   cor12 = cor(waterplus2, mean_va,use = "complete.obs", method = "kendall"),
-                   cor123 = cor(waterplus23, mean_va,use = "complete.obs", method = "kendall"),
-                   cor1234 = cor(waterplus24, mean_va,use = "complete.obs", method = "kendall"),
+  summarize(cor1 = cor(water, mean_va, use = "complete.obs", method = cor_type),
+                   cor2 = cor(water2, mean_va,use = "complete.obs", method = cor_type),
+                   cor12 = cor(waterplus2, mean_va,use = "complete.obs", method = cor_type),
+                   cor123 = cor(waterplus23, mean_va,use = "complete.obs", method = cor_type),
+                   cor1234 = cor(waterplus24, mean_va,use = "complete.obs", method = cor_type),
             n = sum(!is.na(water))) 
 
 ```
