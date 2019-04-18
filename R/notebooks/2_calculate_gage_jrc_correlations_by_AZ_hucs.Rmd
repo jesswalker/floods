@@ -1,0 +1,280 @@
+---
+title: "Calculate correlations between stream gage data and JRC/DSWE 2.0 data in California's Central Valley"
+fontsize: 9
+output: html_notebook
+editor_options:
+  chunk_output_type: inline
+---
+
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+
+## ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+## 2_calculate_gage_jrc_dswe2_correlations_by_CV_hucs.Rmd
+## ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+# ---------------------------------------------------------------------- #
+#### General setup ####
+# ---------------------------------------------------------------------- #
+
+# Load packages in a way that's easy for others to as well
+loadPackages <- function(pkgs){
+  for (pkg in pkgs){
+    #  require returns TRUE invisibly if it was able to load package
+    if(!require(pkg, character.only = TRUE)){
+      #  If package was not able to load, re-install
+      install.packages(pkg, dependencies = TRUE)
+      #  Load package after installing
+      require(pkg, character.only = TRUE)
+    }
+  }
+}
+
+# Load packages
+loadPackages(c("dataRetrieval", "plyr", "tidyverse", 'data.table', 'knitr', 'kableExtra', 'devtools', 'googledrive', 'zoo'))
+
+# Set default as echo FALSE
+knitr::opts_chunk$set(echo = FALSE)
+
+
+```
+
+
+```{r, echo=FALSE}
+
+# ---------------------------------------------------------------------- #
+#### Set NoData threshold ####
+# ---------------------------------------------------------------------- #
+
+# This is not dynamic; this identifies which file to load
+
+nodata_threshold <- 5
+
+
+```
+
+
+```{r,include = F, results = 'hide'}
+
+# ---------------------------------------------------------------------- #
+#### Set files and folders ####
+# ---------------------------------------------------------------------- #
+
+cor_type <- 'spearman' #pearson' #'kendall' # 'pearson'
+
+path.data <-  "E:/projects/place/data/AZ"
+
+file.in <- file.path(path.data, paste0("AZ_jrc_gage_", nodata_threshold, "pct_nodata_merged.RData"))
+
+# Out file specifies correlation test
+file.out <- paste0("AZ_jrc_gage_", nodata_threshold, 'pct_nodata_correlations_', cor_type, ".RData")
+
+```
+
+
+```{r, echo=FALSE}
+
+# ---------------------------------------------------------------------- #
+#### Load file of processed data ####
+# ---------------------------------------------------------------------- #
+
+load(file.in)
+
+```
+
+
+```{r, echo=FALSE, warning=FALSE, include=FALSE}
+
+# ---------------------------------------------------------------------- #
+# Calculate correlations between imagery and gages for all HUCs####
+# ---------------------------------------------------------------------- #
+
+# Calculate correlations based on reduced data set (i.e., NA water values are not yet interpolated)
+# n is the number of months on which the correlation is based
+
+pk_ds_sg.cor.all <- pk_ds_sg %>% 
+  group_by(huc8.img, site_no, type) %>% 
+  mutate(cor = cor(water, mean_va, use = "pairwise.complete.obs", method = cor_type),
+            n = sum(!is.na(water))) 
+
+```
+
+
+
+```{r, echo=FALSE, warning=FALSE, include=FALSE}
+
+# ---------------------------------------------------------------------- #
+# Restrict correlation file ####
+# ---------------------------------------------------------------------- #
+
+# Convert factor to number - otherwise factors trip up operation
+pk_ds_sg.cor.all <- pk_ds_sg.cor.all %>%
+      ungroup() %>% 
+      mutate(huc8.img = as.numeric(as.character(huc8.img)),
+             huc8.sg = as.numeric(as.character(huc8.sg)))
+
+# ALL correlations for rows where imagery HUC = stream gage HUC
+pk_ds_sg.cor.1 <- pk_ds_sg.cor.all %>% 
+  filter(huc8.img == huc8.sg)
+
+# ALL correlations for rows where imagery HUC != gage HUC
+pk_ds_sg.cor.2 <- pk_ds_sg.cor.all %>%
+  filter(huc8.img != huc8.sg) %>% 
+  group_by(huc8.img, type)
+
+# ONLY max correlation for the external sg with the max corr 
+pk_ds_sg.cor.2.max <- pk_ds_sg.cor.2 %>% 
+#  group_by(huc8.img, type) %>% 
+  filter(cor == max(cor)) 
+
+# Combine - all correlations for imagery HUC = sg HUC, max corr for imagery HUC != sg HUC
+pk_ds_sg.cor <- bind_rows(pk_ds_sg.cor.1, pk_ds_sg.cor.2.max)
+```
+
+
+```{r, echo=FALSE, message=FALSE, include=FALSE}
+
+# ---------------------------------------------------------------------- #
+#### Function: Get coefficients for each correlation for 1st order LR ####
+# ---------------------------------------------------------------------- #
+
+# Function to apply linear fit
+lm_fit <- function(f) {
+ # print(head(f))
+  fit <- lm(water ~ mean_va, data = f)
+  results <- broom::tidy(fit)
+  f$b <- results$estimate[1]
+  f$m <- results$estimate[2]
+#  if (residuals(fit)[1][[1]] > 0 & nrow(f) > 3) {  # necessary to put this in to screen overfit lm's...sometimes
+    #   }
+  return(f)
+}
+
+```
+
+
+```{r, echo=FALSE, message=FALSE, include=FALSE}
+
+# ---------------------------------------------------------------------- #
+#### Function: Get coefficients for each correlation for 2nd order LR ####
+# ---------------------------------------------------------------------- #
+
+# Function to apply linear fit
+lm_fit2 <- function(f) { 
+  fit <- lm(water ~ mean_va + I(mean_va^2), data = f)
+  results <- broom::tidy(fit)
+  f$b <- results$estimate[1]
+  f$m <- results$estimate[2]
+  f$m2 <- results$estimate[3]
+  f$r2 <- summary(fit)$r.squared
+
+  return(f)
+}
+
+```
+
+
+
+```{r, echo = FALSE, message=FALSE, include=FALSE}
+# ------------------------------------------------------------------------------- #
+#### Calculate correlation coefficients for imagery and gages from all HUCs - 1st order ####
+# ------------------------------------------------------------------------------- #
+
+#ignore hucs in which all imagery values are NA
+pk_ds_sg.cor$b <- 0
+pk_ds_sg.cor$m <- 0
+
+# Start the clock
+start_time <- Sys.time()
+
+pk_ds_sg.int <- pk_ds_sg.cor %>% 
+  group_by(huc8.img, site_no, type, parameter_cd, huc8.sg, cor) %>% 
+  filter(sum(is.na(water)) != length(water)) %>%
+  filter(abs(cor) != 0.0) %>%  
+  do(lm_fit(.))
+
+end_time <- Sys.time()
+end_time - start_time
+  
+```
+
+
+
+```{r, echo = FALSE, message=FALSE, include=FALSE}
+# ------------------------------------------------------------------------------- #
+#### Calculate correlation coefficients for imagery and gages from all HUCs - 2nd order####
+# ------------------------------------------------------------------------------- #
+
+
+# Start the clock
+start_time <- Sys.time()
+
+pk_ds_sg.int2 <- pk_ds_sg.cor %>% 
+  group_by(huc8.img, site_no, type, parameter_cd, huc8.sg, cor) %>% 
+  filter(sum(is.na(water)) != length(water)) %>%
+  filter(abs(cor) != 0.0) %>%  
+  do(lm_fit2(.))
+
+end_time <- Sys.time()
+end_time - start_time
+  
+```
+
+
+
+```{r, echo=FALSE}
+# ---------------------------------------------------------------------- #
+#### Replace NA imagery values with interpolated data ####
+# ---------------------------------------------------------------------- #
+
+# 1st order
+pk_ds_sg.int$water <- ifelse(is.na(pk_ds_sg.int$water), pk_ds_sg.int$mean_va * pk_ds_sg.int$m + pk_ds_sg.int$b, pk_ds_sg.int$water)
+
+# 2nd order
+pk_ds_sg.int2$water <- ifelse(is.na(pk_ds_sg.int2$water), pk_ds_sg.int2$b + pk_ds_sg.int2$mean_va * pk_ds_sg.int2$m + pk_ds_sg.int2$mean_va^2 * pk_ds_sg.int2$m2, pk_ds_sg.int2$water)
+
+```
+
+
+```{r, echo = FALSE, warning = FALSE}
+
+# ---------------------------------------------------------------------- #
+#### Get max correlations within HUCs and without ####
+# ---------------------------------------------------------------------- #
+
+# Calculate max gage:imagery correlation for each HUC given gages in the same HUC
+cor.huc.max <- pk_ds_sg.int %>% 
+  filter(huc8.img == huc8.sg) %>% 
+  group_by(huc8.img, type) %>% 
+  select(-starts_with('water'), -c(date, interp, mean_va, b, m)) %>% 
+  slice(which.max(cor))
+
+# Calculate max gage:imagery correlation for each HUC given all possible gages
+cor.all.max <- pk_ds_sg.int %>% 
+  group_by(huc8.img, type) %>% 
+  slice(which.max(cor)) %>% 
+  group_by(site_no) %>% 
+  select(-starts_with('water'), -c(date, interp, mean_va, b, m)) %>% 
+  mutate(n_site = n_distinct(huc8.img)) %>%  # Get the number of times each gage appears
+  ungroup()
+
+# Are the gage and imagery in the same HC?
+cor.all.max$same_huc <- NA
+cor.all.max$same_huc <- 'Y'
+cor.all.max$same_huc[cor.all.max$huc8.img != cor.all.max$huc8.sg] <- 'N'
+
+```
+
+
+
+
+```{r, echo = FALSE}
+
+# ---------------------------------------------------------------------- #
+# save file of merged data ####
+# ---------------------------------------------------------------------- #
+
+save(cor.all.max, cor.huc.max, pk_ds_sg.int, pk_ds_sg.int2, file = file.path(path.data, file.out))
+
+```
+
