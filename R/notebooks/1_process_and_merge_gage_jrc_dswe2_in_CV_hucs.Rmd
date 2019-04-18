@@ -19,8 +19,6 @@ editor_options:
 # ---------------------------------------------------------------------- #
 
 # Load packages in a way that's easy for others to as well
-# Credit due: Simon at https://stackoverflow.com/questions/4090169/elegant-way-to-check-for-missing-packages-and-install-them
-
 loadPackages <- function(pkgs){
   for (pkg in pkgs){
     #  require returns TRUE invisibly if it was able to load package
@@ -387,7 +385,7 @@ sg <- sg %>%
 # Merge imagery and stream gage data across all HUCs####
 # ---------------------------------------------------------------------- #
 
-# Merge Pekel/DSWE and gage data by date. Rename sg HUC to avoid confusion between HUCs
+# Merge JRC/DSWE and gage data by date. Rename sg HUC to avoid confusion between HUCs
 pk_ds_sg <-  sg %>% 
    right_join(pk_ds, by = c('date')) %>% 
    rename(huc8.img = huc8)

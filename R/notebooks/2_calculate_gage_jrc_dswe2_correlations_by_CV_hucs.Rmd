@@ -18,8 +18,6 @@ editor_options:
 # ---------------------------------------------------------------------- #
 
 # Load packages in a way that's easy for others to as well
-# Credit due: Simon at https://stackoverflow.com/questions/4090169/elegant-way-to-check-for-missing-packages-and-install-them
-
 loadPackages <- function(pkgs){
   for (pkg in pkgs){
     #  require returns TRUE invisibly if it was able to load package
@@ -52,7 +50,6 @@ knitr::opts_chunk$set(echo = FALSE)
 
 nodata_threshold <- 5
 
-cor_type <- 'spearman' #pearson' #'kendall' # 'pearson'
 
 ```
 
@@ -62,6 +59,8 @@ cor_type <- 'spearman' #pearson' #'kendall' # 'pearson'
 # ---------------------------------------------------------------------- #
 #### Set files and folders ####
 # ---------------------------------------------------------------------- #
+
+cor_type <- 'spearman' #pearson' #'kendall' # 'pearson'
 
 path.data <-  "E:/projects/place/data"
 
@@ -124,7 +123,8 @@ pk_ds_sg.cor.2 <- pk_ds_sg.cor.all %>%
   group_by(huc8.img, type)
 
 # ONLY max correlation for the external sg with the max corr 
-pk_ds_sg.cor.2.max <- pk_ds_sg.cor.2 %>%  
+pk_ds_sg.cor.2.max <- pk_ds_sg.cor.2 %>% 
+#  group_by(huc8.img, type) %>% 
   filter(cor == max(cor)) 
 
 # Combine - all correlations for imagery HUC = sg HUC, max corr for imagery HUC != sg HUC
