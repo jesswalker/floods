@@ -341,6 +341,56 @@ pk_ds_sg.int %>%
 
 ```
 
+
+
+
+
+<br>
+
+####How many gages are found in HUCs?
+```{r, echo = FALSE}
+# ---------------------------------------------------------------------- #
+# Number of gages in each HUC ####
+# ---------------------------------------------------------------------- #
+
+pk_ds_sg.int %>%
+  filter(huc8.img == huc8.sg & type == "dswe") %>%  # each gage will have data for either dataset
+  distinct(huc8.img)  %>% 
+  group_by(huc8.img) %>% 
+  summarise(n = n()) %>% 
+  ungroup() %>% 
+  group_by(n) %>% 
+  summarise(n_total = n()) %>%   
+  kable(col.names = c("# of gages", "# HUCs"), digits = 3) %>%  
+  kable_styling("striped", full_width = FALSE, position = 'left') %>% 
+  scroll_box(height = '400px', width = '400px')
+
+
+```
+<br>
+
+####Mean and median # of gages per HUC
+
+```{r, echo = FALSE}
+# ---------------------------------------------------------------------- #
+# Mean and median # of gages/HUC ####
+# ---------------------------------------------------------------------- #
+
+pk_ds_sg.int %>%
+  filter(huc8.img == huc8.sg & type == 'dswe') %>% 
+  distinct(site_no, huc8.img)  %>% 
+  group_by(huc8.img) %>% 
+  summarise(n = sum(n())) %>% 
+  summarise(mean = mean(n),
+            med = median(n))  %>% 
+  kable(col.names = c("mean # gages/HUC", "median # gages/HUC"), digits = 3) %>%  
+  kable_styling("striped", full_width = FALSE, position = 'left') %>% 
+  scroll_box(height = '400px', width = '400px')
+
+
+```
+
+
 <br>
 
 ####Correlation between COV and R values
