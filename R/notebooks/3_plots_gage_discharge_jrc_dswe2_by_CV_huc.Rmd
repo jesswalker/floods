@@ -70,13 +70,14 @@ cor_threshold <- 0.7
 ```{r, echo=FALSE}
 
 # ---------------------------------------------------------------------- #
-#### Set NoData threshold ####
+#### Set NoData threshold and correlation type ####
 # ---------------------------------------------------------------------- #
 
 # This is not dynamic; this identifies which file to load
 
 nodata_threshold <- 5
 
+# Correlation test
 cor_type <- 'spearman' #'pearson' #'spearman' #'pearson' # 'kendall'
 
 ```
@@ -88,7 +89,7 @@ cor_type <- 'spearman' #'pearson' #'spearman' #'pearson' # 'kendall'
 #### Set files and folders ####
 # ---------------------------------------------------------------------- #
 
-#plots are saved to path.out/plots
+# Plots are saved to path.out/plots
 
 path.data <-  "E:/projects/place"
 file.in <- file.path(path.data, "data", paste0("CV_dswe_jrc_gage_", nodata_threshold, "pct_nodata_correlations_", cor_type,".RData"))
@@ -194,9 +195,13 @@ Total number of gages across the CV
 
 ```{r, echo = FALSE}
 
-pk_ds_sg.int %>%
+n_gages <- pk_ds_sg.int %>%
   ungroup() %>% 
-  summarize(n_all = n_distinct(site_no)) %>% 
+  summarize(n_all = n_distinct(site_no)) 
+
+n_gages <- n_gages[[1]]
+
+n_gages %>% 
    kable(col.names = c("n")) %>%  
      kable_styling("striped", full_width = FALSE, position = 'left') 
 ```
@@ -231,9 +236,9 @@ pk_ds_sg.int %>%
   distinct(huc8.img, cor) %>%
   filter(cor > cor_threshold) %>% 
   summarise(n_over = n(),
-            pct_gt = n_over/548*100,
-            n_under = 548 - n(),
-            pct_lt = n_under/548*100) %>% 
+            pct_gt = n_over/n_gages * 100,
+            n_under = n_gages - n(),
+            pct_lt = n_under/n_gages * 100) %>% 
     
    kable(col.names = c("Dataset", "# greater than ", '%', "# less than", "%"), digits = 1) %>%  
      kable_styling("striped", full_width = FALSE, position = 'left') 
@@ -244,6 +249,8 @@ pk_ds_sg.int %>%
 Within-HUC correlations greater than `r cor_threshold` - max r in each HUC
 
 ```{r, echo = FALSE}
+
+# *** hard-coded value for the number of HUCs
 
 cor.huc.max %>% 
   group_by(type) %>%
@@ -340,10 +347,30 @@ pk_ds_sg.int %>%
 
 
 ```
+<br>
 
+####Correlations in HUCs w different numbers of gages
+```{r, echo = FALSE,  warning = FALSE, message=FALSE}
+# ---------------------------------------------------------------------- #
+# Mean of the maximums correlations in each HUC, by group ####
+# ---------------------------------------------------------------------- #
 
+temp <- pk_ds_sg.int %>%
+  filter(huc8.img == huc8.sg) %>%  # each gage will have data for either dataset
+  distinct(huc8.img)  %>% 
+  group_by(huc8.img, type) %>% 
+  summarise(n_gages = n(),
+            max_cor = max(cor)) %>%
+  mutate(cat = if(n_gages < 6) "N" else "Y") 
 
+temp %>% 
+  group_by(type, cat) %>% 
+  summarise(n_total = n(),
+            cor = mean(max_cor)) %>%   
+  kable(col.names = c("Dataset", "More than 6 gages/HUC",  "# HUCs", 'Mean max cor'), digits = 3) %>%  
+  kable_styling("striped", full_width = FALSE, position = 'left')
 
+```
 
 <br>
 
@@ -375,14 +402,28 @@ pk_ds_sg.int %>%
 # ---------------------------------------------------------------------- #
 # Mean and median # of gages/HUC ####
 # ---------------------------------------------------------------------- #
+# Currently hard-coded in.  Could get the missing huc(s) by:
 
-pk_ds_sg.int %>%
+# setdiff(unique(pk_ds_sg.int$huc8.img), unique(pk_ds_sg.int$huc8.sg))
+
+mean_n_gages <- pk_ds_sg.int %>%
   filter(huc8.img == huc8.sg & type == 'dswe') %>% 
   distinct(site_no, huc8.img)  %>% 
   group_by(huc8.img) %>% 
-  summarise(n = sum(n())) %>% 
+  summarise(n = sum(n())) 
+
+missing_huc <- c('18030004', 0)
+
+# Add missing gage to
+mean_n_gages <- rbind(missing_huc, mean_n_gages)
+mean_n_gages <- as.data.frame(mean_n_gages)
+
+
+mean_n_gages %>% 
+  ungroup() %>% 
+  mutate(n = as.numeric(n)) %>% 
   summarise(mean = mean(n),
-            med = median(n))  %>% 
+            med = median(n)) %>% 
   kable(col.names = c("mean # gages/HUC", "median # gages/HUC"), digits = 3) %>%  
   kable_styling("striped", full_width = FALSE, position = 'left') %>% 
   scroll_box(height = '400px', width = '400px')
