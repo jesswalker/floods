@@ -6,6 +6,17 @@ editor_options:
   chunk_output_type: inline
 ---
 
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+
+## Explanation of imported files
+
+# pk_ds_sg.int - file of all interpolated values for imagery HUC = sg HUC, and ONLY the values corresponding to the max correlation for imagery HUC != sg HUC
+
+
+
+```
+
+
 
 ```{r, echo=FALSE, warning=FALSE, message=FALSE}
 
@@ -57,7 +68,6 @@ Sys.setenv("plotly_api_key"="KXnTHoAperT2jUBO89Xr")
 
 # ---------------------------------------------------------------------- #
 #### Set correlation threshold and type ####
-# ---------------------------------------------------------------------- #
 
 # Identifies threshold between good and bad correlations
 
@@ -381,17 +391,16 @@ temp %>%
 # ---------------------------------------------------------------------- #
 
 pk_ds_sg.int %>%
+  ungroup() %>% # added bc slooow otherwise
   filter(huc8.img == huc8.sg & type == "dswe") %>%  # each gage will have data for either dataset
-  distinct(huc8.img)  %>% 
   group_by(huc8.img) %>% 
-  summarise(n = n()) %>% 
+  summarize(n_gages = n_distinct(site_no)) %>% 
   ungroup() %>% 
-  group_by(n) %>% 
-  summarise(n_total = n()) %>%   
+  group_by(n_gages) %>% 
+  summarize(n_hucs = n()) %>% 
   kable(col.names = c("# of gages", "# HUCs"), digits = 3) %>%  
   kable_styling("striped", full_width = FALSE, position = 'left') %>% 
   scroll_box(height = '400px', width = '400px')
-
 
 ```
 <br>
@@ -402,11 +411,13 @@ pk_ds_sg.int %>%
 # ---------------------------------------------------------------------- #
 # Mean and median # of gages/HUC ####
 # ---------------------------------------------------------------------- #
-# Currently hard-coded in.  Could get the missing huc(s) by:
+# Need to incorporate the missing HUC(s) to ensure the mean is calculated correctly.
+# The missing HUC is currently hard-coded in.  Could get it programmatically by:
 
 # setdiff(unique(pk_ds_sg.int$huc8.img), unique(pk_ds_sg.int$huc8.sg))
 
 mean_n_gages <- pk_ds_sg.int %>%
+  ungroup() %>% 
   filter(huc8.img == huc8.sg & type == 'dswe') %>% 
   distinct(site_no, huc8.img)  %>% 
   group_by(huc8.img) %>% 
@@ -430,11 +441,77 @@ mean_n_gages %>%
 
 
 ```
-
-
 <br>
 
-####Correlation between COV and R values
+####Identify long-term time series and missing months of data
+
+```{r, echo = FALSE, warning = FALSE}
+
+pk_ds_sg.long <-   
+  pk_ds_sg.int %>%
+  group_by(site_no, huc8.img, huc8.sg, type, cor) %>% 
+  summarize(n = n()) %>% 
+  filter(n > 300 & cor > 0.7)
+
+pk_ds_sg.int.long <- 
+  inner_join(pk_ds_sg.long, pk_ds_sg.int, by = c("site_no", "huc8.img", "huc8.sg", "type", "cor"))
+
+write.csv(pk_ds_sg.int.long, file = "E:/projects/place/output/tables/pk_ds_sg_gt30years_and_corgt0pt7.csv", row.names = FALSE)
+
+```
+
+Which internal-match HUCs had 30+ years of data and a correlation basis > 0.7?
+```{r, echo = FALSE}
+
+pk_ds_sg.int.long %>% 
+  group_by(site_no, huc8.img, huc8.sg, type, cor) %>% 
+  filter(huc8.img == huc8.sg) %>% 
+  group_by(huc8.img) %>% 
+  slice(which.max(cor)) %>% 
+  distinct(site_no, huc8.img, huc8.sg, type, cor) %>% 
+  arrange(huc8.img, site_no) %>% 
+  kable(col.names = c("Gage", "Imagery HUC", "Gage HUC", "Dataset", 'Corr')) %>%  
+  kable_styling("striped", full_width = FALSE, position = 'left') %>% 
+    scroll_box(height = '400px', width = '400px')
+
+
+```
+
+
+
+Which external-match HUCs had 30+ years of data and a correlation basis > 0.7?
+```{r, echo = FALSE}
+
+pk_ds_sg.int.long %>% 
+  group_by(site_no, huc8.img, huc8.sg, type, cor) %>% 
+  filter(huc8.img != huc8.sg) %>% 
+  group_by(huc8.img) %>% 
+  slice(which.max(cor)) %>% 
+  distinct(site_no, huc8.img, huc8.sg, type, cor) %>% 
+  arrange(huc8.img, site_no) %>% 
+  kable(col.names = c("Gage", "Imagery HUC", "Gage HUC", "Dataset", 'Corr')) %>%  
+  kable_styling("striped", full_width = FALSE, position = 'left') %>% 
+    scroll_box(height = '400px', width = '400px')
+
+
+```
+How man distinct HUCs had 30+ years of data and a correlation basis > 0.7?
+```{r, echo = FALSE}
+
+pk_ds_sg.int.long %>% 
+  ungroup() %>% 
+  distinct(huc8.img) %>% 
+  summarize(n = n()) %>% 
+  kable(col.names = c("# of HUCs")) %>%  
+  kable_styling("striped", full_width = FALSE, position = 'left')
+
+
+```
+
+
+
+
+####Correlation between COV and r values
 
 ```{r, echo = FALSE}
 corr_stats <-  pk_ds_sg.int %>%
@@ -449,6 +526,11 @@ print(cor(corr_stats$cor, corr_stats$cov), digits = 3)
 
 
 ```
+
+
+
+
+
 
 <br>
 
