@@ -97,6 +97,8 @@ pk_ds_sg.cor.all <- pk_ds_sg %>%
   mutate(cor = cor(water, mean_va, use = "pairwise.complete.obs", method = cor_type),
             n = sum(!is.na(water))) 
 
+rm(pk_ds_sg)
+
 ```
 
 
@@ -108,6 +110,7 @@ pk_ds_sg.cor.all <- pk_ds_sg %>%
 # ---------------------------------------------------------------------- #
 
 # Convert factor to number - otherwise factors trip up operation
+
 pk_ds_sg.cor.all <- pk_ds_sg.cor.all %>%
       ungroup() %>% 
       mutate(huc8.img = as.numeric(as.character(huc8.img)),
@@ -115,24 +118,26 @@ pk_ds_sg.cor.all <- pk_ds_sg.cor.all %>%
 
 # ALL correlations for rows where imagery HUC = stream gage HUC
 pk_ds_sg.cor.1 <- pk_ds_sg.cor.all %>% 
-  filter(huc8.img == huc8.sg)
+   filter(huc8.img == huc8.sg)
 
-# ALL correlations for rows where imagery HUC != gage HUC
+# ALL correlations for rows where imagery HUC != gage HUC. Filter these bc otherwise the file explodes in size
 pk_ds_sg.cor.2 <- pk_ds_sg.cor.all %>%
   filter(huc8.img != huc8.sg) %>% 
-  group_by(huc8.img, type)
+  filter(cor > 0.5)
 
 # ONLY max correlation of imagery with an external streamgage
 #### Ideally we would have the max correlations for both gages (DSWE and JRC) if they're not the same; that is,
 #### if the max corr for the JRC dataset in a given HUC is with gage X, we would also have the values for the 
 #### correlation of DSWE data with that gage. Currently, the final set only has the max correlation for
 #### each dataset, meaning the gages can be different.
-pk_ds_sg.cor.2.max <- pk_ds_sg.cor.2 %>% 
-#  group_by(huc8.img, type) %>% 
-  filter(cor == max(cor)) 
+
+# pk_ds_sg.cor.2.max <- pk_ds_sg.cor.2 %>% 
+#  filter(cor == max(cor)) 
 
 # Combine - all correlations for imagery HUC = sg HUC, max corr for imagery HUC != sg HUC
-pk_ds_sg.cor <- bind_rows(pk_ds_sg.cor.1, pk_ds_sg.cor.2.max)
+ pk_ds_sg.cor <- bind_rows(pk_ds_sg.cor.1, pk_ds_sg.cor.2) #.max)
+
+ rm(pk_ds_sg.cor.1, pk_ds_sg.cor.2, pk_ds_sg.cor.all)
 ```
 
 
@@ -249,6 +254,7 @@ pk_ds.cor <- pk_ds.sub %>%
             n_pekel = sum(!is.na(water_pk)),
             n_dswe = sum(!is.na(water_ds))) # Used to look at correlation between data density and correlation
 
+rm(ds, ds.sub, pk.sub, pk_ds_sg.cor)
 ```
 
 
@@ -262,7 +268,7 @@ pk_ds.cor <- pk_ds.sub %>%
 pk_ds_sg.int$water <- ifelse(is.na(pk_ds_sg.int$water), pk_ds_sg.int$mean_va * pk_ds_sg.int$m + pk_ds_sg.int$b, pk_ds_sg.int$water)
 
 # 2nd order
-pk_ds_sg.int2$water <- ifelse(is.na(pk_ds_sg.int2$water), pk_ds_sg.int2$b + pk_ds_sg.int2$mean_va * pk_ds_sg.int2$m + pk_ds_sg.int2$mean_va^2 * pk_ds_sg.int2$m2, pk_ds_sg.int2$water)
+ pk_ds_sg.int2$water <- ifelse(is.na(pk_ds_sg.int2$water), pk_ds_sg.int2$b + pk_ds_sg.int2$mean_va * pk_ds_sg.int2$m + pk_ds_sg.int2$mean_va^2 * pk_ds_sg.int2$m2, pk_ds_sg.int2$water)
 
 ```
 
@@ -339,7 +345,8 @@ ds_sg.cor <- ds_sg %>%
 # save file of merged data ####
 # ---------------------------------------------------------------------- #
 
-save(cor.all.max, cor.huc.max, pk_ds.cor, ds_sg.cor, pk_ds, pk_ds_sg.int, pk_ds_sg.int2, file = file.path(path.data, file.out))
+save(cor.all.max, cor.huc.max, pk_ds.cor, ds_sg.cor, pk_ds, pk_ds_sg.int, file = file.path(path.data, file.out))
+# , pk_ds_sg.int2
 
 ```
 
