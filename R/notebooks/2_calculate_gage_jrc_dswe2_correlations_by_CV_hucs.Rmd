@@ -122,7 +122,11 @@ pk_ds_sg.cor.2 <- pk_ds_sg.cor.all %>%
   filter(huc8.img != huc8.sg) %>% 
   group_by(huc8.img, type)
 
-# ONLY max correlation for the external sg with the max corr 
+# ONLY max correlation of imagery with an external streamgage
+#### Ideally we would have the max correlations for both gages (DSWE and JRC) if they're not the same; that is,
+#### if the max corr for the JRC dataset in a given HUC is with gage X, we would also have the values for the 
+#### correlation of DSWE data with that gage. Currently, the final set only has the max correlation for
+#### each dataset, meaning the gages can be different.
 pk_ds_sg.cor.2.max <- pk_ds_sg.cor.2 %>% 
 #  group_by(huc8.img, type) %>% 
   filter(cor == max(cor)) 
@@ -204,7 +208,6 @@ end_time - start_time
 # ------------------------------------------------------------------------------- #
 #### Calculate correlation coefficients for imagery and gages from all HUCs - 2nd order####
 # ------------------------------------------------------------------------------- #
-
 
 # Start the clock
 start_time <- Sys.time()
