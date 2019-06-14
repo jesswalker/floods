@@ -60,7 +60,7 @@ nodata_threshold <- 5
 #### Set files and folders ####
 # ---------------------------------------------------------------------- #
 
-cor_type <- 'spearman' #pearson' #'kendall' # 'pearson'
+cor_type <- 'spearman' #pearson' #'kendall' # 'pearson' 'spearman' 
 
 path.data <-  "E:/projects/place/data"
 
@@ -94,8 +94,18 @@ load(file.in)
 
 pk_ds_sg.cor.all <- pk_ds_sg %>% 
   group_by(huc8.img, site_no, type) %>% 
-  mutate(cor = cor(water, mean_va, use = "pairwise.complete.obs", method = cor_type),
+  mutate(cor = cor.test(water, mean_va, use = "pairwise.complete.obs", method = cor_type),
             n = sum(!is.na(water))) 
+
+pk_ds_sg.cor.all <- pk_ds_sg %>% 
+  group_by(huc8.img, site_no, type) %>% 
+  filter(rowSums(!is.na(.)) > 3)
+
+%>% 
+ # filter(n() > ) %>% 
+  mutate(p = cor.test(water, mean_va, method = cor_type)$p.value,
+         cor = cor.test(water, mean_va, method = cor_type)$estimate,
+         n = sum(!is.na(water))) 
 
 rm(pk_ds_sg)
 
@@ -276,7 +286,7 @@ pk_ds_sg.int$water <- ifelse(is.na(pk_ds_sg.int$water), pk_ds_sg.int$mean_va * p
 ```{r, echo = FALSE, warning = FALSE}
 
 # ---------------------------------------------------------------------- #
-#### Get max correlations within HUCs and without ####
+#### Get max correlations within HUC and without ####
 # ---------------------------------------------------------------------- #
 
 # Calculate max gage:imagery correlation for each HUC given gages in the same HUC
@@ -284,7 +294,14 @@ cor.huc.max <- pk_ds_sg.int %>%
   filter(huc8.img == huc8.sg) %>% 
   group_by(huc8.img, type) %>% 
   select(-starts_with('water'), -c(date, interp, mean_va, b, m)) %>% 
-  slice(which.max(cor))
+  slice(which.max(cor)) 
+
+cor.huc.max %>%
+  select(c(site_no, huc8.img, huc8.sg, type, cor, n)) %>% 
+  arrange(huc8.img) %>% 
+  kable(col.names = c("Gage",  "Imagery HUC", "Gage HUC", "Dataset", "cor", "n" ), digits = 3) %>%  
+  kable_styling("striped", full_width = FALSE, position = 'left') %>% 
+  scroll_box(height = '400px', width = '400px')
 
 # Calculate max gage:imagery correlation for each HUC given all possible gages
 cor.all.max <- pk_ds_sg.int %>% 
@@ -301,6 +318,37 @@ cor.all.max$same_huc <- 'Y'
 cor.all.max$same_huc[cor.all.max$huc8.img != cor.all.max$huc8.sg] <- 'N'
 
 ```
+
+```{r, echo = FALSE, warning = FALSE}
+
+# ---------------------------------------------------------------------- #
+#### Get max correlations external to HUCs ####
+# ---------------------------------------------------------------------- #
+
+# Calculate max gage:imagery correlation for each HUC given all possible gages
+cor.all.max <- pk_ds_sg.int %>% 
+  group_by(huc8.img, type) %>% 
+  slice(which.max(cor)) %>% 
+  group_by(site_no) %>% 
+  select(-starts_with('water'), -c(date, interp, mean_va, b, m)) %>% 
+  mutate(n_site = n_distinct(huc8.img)) %>%  # Get the number of times each gage appears
+  ungroup()
+
+# Are the gage and imagery in the same HC?
+cor.all.max$same_huc <- NA
+cor.all.max$same_huc <- 'Y'
+cor.all.max$same_huc[cor.all.max$huc8.img != cor.all.max$huc8.sg] <- 'N'
+
+
+cor.all.max %>%
+  select(c(site_no, huc8.img, huc8.sg, type, cor, n)) %>% 
+  arrange(huc8.img) %>% 
+  kable(col.names = c("Gage",  "Imagery HUC", "Gage HUC", "Dataset", "cor", "n" ), digits = 3) %>%  
+  kable_styling("striped", full_width = FALSE, position = 'left') %>% 
+  scroll_box(height = '400px', width = '400px')
+
+```
+
 
 
 ```{r, echo = FALSE, error = FALSE}
