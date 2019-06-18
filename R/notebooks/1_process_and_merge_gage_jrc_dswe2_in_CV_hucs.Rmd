@@ -1,5 +1,5 @@
 ---
-title: "Process and merge stream gage data with JRC and DSWE 2.0 data in California's Central Valley"
+title: "Process and merge stream gage data with JRC and DSWE data in California's Central Valley"
 fontsize: 9
 output: html_notebook
 editor_options:
@@ -56,29 +56,30 @@ nodata_threshold <- 5
 #### Set output files and folders ####
 # ---------------------------------------------------------------------- #
 
-path.out <-  "E:/projects/place/data"
+path.out <- "E:/projects/place/data"
 
 file.out <- paste0("CV_dswe_jrc_gage_", nodata_threshold, "pct_nodata_merged.RData")
 
 
 ```
-####Steps  
+####Workflow 
 
-  - JRC and DSWE 2.0 monthly composites within all Central Valley HUCs retrieved from online Google Drive account
-    - Both files processed to convert values, standardize names, etc. 
-    - In scenes with > **`r nodata_threshold`%** No Data, the water values are zeroed out pending later interpolation
-  - Metadata retrieved from NWIS for all gages in Central Valley
-  - Gages assessed for length of data record, data type
+  - Retrieve JRC and DSWE monthly composites within all Central Valley HUCs from Google Drive 
+    - Process JRC and DSWE files to convert values, standardize names, etc. 
+    - In scenes with > **`r nodata_threshold`%** No Data, zero out water values pending interpolation
+  - Retrieve metadata from NWIS for all gages in Central Valley
+  - Assess gages records for length of data, data type
     - Gage record has to include at least 5 years of data after 1984
     - Discharge or gage height
-  - Stream gage data retrieved (NWIS)
-  - Stream gage, JRC, and DSWE data combined for all HUCs
+  - Retrieve stream gage data from NWIS
+  - Combine stream gage, JRC, and DSWE data for all HUCs
   
-  - Output file is written to **`r file.path(path.out, 'data', file.out)`**
+####Output
+  - Stream gage, JRC, and DSWE file written to **`r file.path(path.out, 'data', file.out)`**
   
  
 
-```{r, echo=TRUE}
+```{r, echo = FALSE}
 
 # ---------------------------------------------------------------------- #
 # ------ Function - Process Pekel data ---------
@@ -241,7 +242,7 @@ pk_ds <- rbind(pk, ds)
 #### Stream gage - read in gage info (not data) for CV HUCs ####
 # ---------------------------------------------------------------------- #
 
-# This will allow us to narrow the list of desired gages based on the data available in each
+# This allows us to narrow the list of desired gages based on the data available in each
 
 hucs_all <- c('18020002', '18020003','18020004', '18020005', '18020104', '18020111', '18020115',
 '18020116', '18020121', '18020122', '18020123', '18020125', '18020126', '18020128', '18020129', '18020151',
@@ -404,6 +405,11 @@ pk_ds_sg <- pk_ds_sg %>%
 # Assign tag for whether imagery water data is interpolated (Y) or original (N)
 pk_ds_sg$interp <- ifelse(is.na(pk_ds_sg$water), 'Y', 'N')
 pk_ds_sg$interp <- as.factor(pk_ds_sg$interp)
+
+
+# Make sure all data are valid
+pk_ds_sg <-  pk_ds_sg[complete.cases(pk_ds_sg[ , 1]), ]
+
 ```
 
 
