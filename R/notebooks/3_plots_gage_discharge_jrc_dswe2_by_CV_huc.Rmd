@@ -1,21 +1,10 @@
 ---
-title: "Plotting stream gage info with JRC and DSWE 2.0 data in California's Central Valley"
+title: "Stream gage correlations with JRC and DSWE data in California's Central Valley - Results"
 fontsize: 9
 output: html_notebook
 editor_options:
   chunk_output_type: inline
 ---
-
-```{r, echo=FALSE, warning=FALSE, message=FALSE}
-
-## Explanation of imported files
-
-# pk_ds_sg.int - file of all interpolated values for imagery HUC = sg HUC, and ONLY the values corresponding to the max correlation for imagery HUC != sg HUC
-
-
-
-```
-
 
 
 ```{r, echo=FALSE, warning=FALSE, message=FALSE}
@@ -29,7 +18,6 @@ editor_options:
 # ---------------------------------------------------------------------- #
 
 # Load packages in a way that's easy for others to as well
-# Credit due: Simon at https://stackoverflow.com/questions/4090169/elegant-way-to-check-for-missing-packages-and-install-them
 
 loadPackages <- function(pkgs){
   for (pkg in pkgs){
@@ -52,7 +40,6 @@ loadPackages(c("ggmap", "sf", "maps", "mapdata", 'rgdal', 'plotly'))
 # Set default as echo FALSE
 knitr::opts_chunk$set(echo = FALSE)
 
-
 ```
 
 
@@ -73,7 +60,6 @@ Sys.setenv("plotly_api_key"="KXnTHoAperT2jUBO89Xr")
 
 cor_threshold <- 0.7
 
-
 ```
 
 
@@ -87,8 +73,8 @@ cor_threshold <- 0.7
 
 nodata_threshold <- 5
 
-# Correlation test
-cor_type <- 'spearman' #'pearson' #'spearman' #'pearson' # 'kendall'
+# Correlation test used for gage to imagery comparisons
+cor_type <- 'spearman' #'pearson' # 'kendall'
 
 ```
 
@@ -133,7 +119,8 @@ load(file.in)
 
 if (!file.exists(file.path(shp.dir, shp.name))) {
   data_url = "1_2JnwZFS0blok23-9O7lw-o7Hk96E-nc" 
-  download.file(sprintf("https://docs.google.com/uc?id=%s&export=download", data_url), destfile = file.path(shp.dir, "huc.zip"), mode='wb')
+  download.file(sprintf("https://docs.google.com/uc?id=%s&export=download", data_url), 
+                destfile = file.path(shp.dir, "huc.zip"), mode = 'wb')
   unzip(zipfile = file.path(shp.dir, 'huc.zip'), exdir = shp.dir)
   file.remove(file.path(shp.dir, 'huc.zip'))
 }
@@ -143,16 +130,28 @@ shp <- st_read(dsn = file.path(shp.dir, shp.name), stringsAsFactors = F)
 ```
 
 
-####Background
+####Workflow
 
-  - Script **process_gage_discharge_pekel_dswe2_correlations_by_CV_huc.Rmd** must be run prior to this script
-  - File of JRC, DSWE, and stream gage monthly values is retrieved
+* Load R image file of correlations between stream gage info and JRC/DSWE data
+* Calculate and/or plot relevant statistics
   - Discharge/imagery correlation type: **`r toupper(cor_type)`** 
-  - Clear pixel threshold value: **`r nodata_threshold`**%
+  - Clear-pixel threshold value: **`r nodata_threshold`**%
 
+
+####Inputs
+
+  - R image file generated from **process_gage_discharge_pekel_dswe2_correlations_by_CV_huc.Rmd** (`r file.path(path.data, "data")`)
+  - Shapefile of Central Valley HUCs (Google Drive)
   
-  <br>
+
+####Outputs
+
+  - In-line results
+  - Plots of augmented JRC and DSWE time series based on within- and external-HUC gage correlations to **`r file.path(path.data, "plots")`**
   
+<br>  
+
+
 ####Central Valley HUCs
   
 ```{r, echo = FALSE, message = FALSE}
@@ -163,7 +162,7 @@ shp <- st_read(dsn = file.path(shp.dir, shp.name), stringsAsFactors = F)
 
 shp %>% 
 ggplot() + 
-  geom_sf(aes(fill = HUC8), show.legend = NA) +  # FALSE for no legend
+  geom_sf(aes(fill = HUC8), show.legend = FALSE) +  # FALSE for no legend
   theme_bw() +
   coord_sf(crs = st_crs(26910)) # set UTM zone 10 projection
 
@@ -177,7 +176,7 @@ ggplot() +
   
 ####NoData proportions
 
-JRC and DSWE data show different proportions of NoData pixels (clouds, cloud shadows, or snow). In general, DSWE data have lower proportions of contaminated pixels. A seasonal breakdown shows that DSWE winter and fall images tend to have more "workable" data than JRC images. The quality of that data may be substandard, however. 
+JRC and DSWE data show different proportions of NoData pixels (clouds, cloud shadows, or snow). In general, DSWE data have lower proportions of contaminated pixels. A seasonal breakdown shows that DSWE winter and fall images tend to have more "workable" data than JRC images. The quality of that data is unknown, however. 
 
 ```{r, echo = F, warning = FALSE}
 
@@ -190,13 +189,38 @@ yq <- as.yearqtr(as.yearmon(pk_ds_season$date, "%Y-%m-%d") + 1/12)
 pk_ds_season$season <- factor(format(yq, "%q"), levels = 1:4, 
 labels = c("Winter", "Spring", "Summer", "Fall"))
 
-
+# Figure for display
 ggplot(pk_ds_season, aes(season, pct, color = type)) + 
   geom_boxplot() +
-  theme_bw() +
-  theme(axis.title.x = element_blank()) + 
+  theme(axis.text = element_text(size = 10),  #12
+        axis.title = element_text(size = 12), #14
+        axis.text.x = element_text(vjust = 0.2),
+        axis.title.x = element_blank(), 
+        legend.text = element_text(size = 10),  #12
+        legend.title = element_text(size = 12)) +  #14
   ylab("% NoData pixels") +
   scale_color_discrete(name = "Dataset", breaks = c("dswe", "pekel"), labels = c("DSWE", "JRC"))
+
+
+# Figure for publication
+# ggplot(pk_ds_season, aes(season, pct, color = type)) + 
+#   geom_boxplot(lwd = 0.46, outlier.size = 0.4) +
+#   theme_bw(base_size = 5) +
+#   theme(axis.text = element_text(size = 8),  #12
+#         axis.title = element_text(size = 10), #14
+#         axis.text.x = element_text(vjust = 0.2),
+#         axis.title.x = element_blank(), 
+#         legend.text = element_text(size = 8),  #12
+#         legend.title = element_text(size = 10)) +  #14
+#   ylab("% NoData pixels") +
+#   scale_color_discrete(name = "Dataset", breaks = c("dswe", "pekel"), labels = c("DSWE", "JRC"))
+# 
+# ggsave(file = file.path(path.data, "plots", paste0("nodata_pixels.pdf")),
+#         width = 4.5, #7
+#         height = 2.8, #4
+#         units = "in",
+#         dpi = 600)
+
 ```
 ####General gage/discharge stats
 
@@ -217,7 +241,7 @@ n_gages %>%
 ```
 
 <br>
-Range of monthly mean gage discharge
+Range of monthly mean gage discharge (cu ft/s)
 ```{r, echo = FALSE}
 
 pk_ds_sg.int %>%
@@ -271,6 +295,7 @@ cor.huc.max %>%
  kable(col.names = c("Type", "n", "% of HUCs"), digits = 1) %>%  
      kable_styling("striped", full_width = FALSE, position = 'left')  
 ```
+
 Range of maximum within-HUC correlations
 
 ```{r, echo = FALSE}
@@ -306,10 +331,10 @@ p <- ggplot(cor.huc.max, aes(x = reorder(huc8.img, -cor), y = cor, fill = type))
        ylab('Correlation') +
        scale_fill_manual(name = "Dataset", 
                     values = c('#F8766D', '#00BFC4'), 
-                 #   values = c('orange', 'lightblue'),
                     breaks = c("dswe", "pekel"),
-                    labels = c("DSWE", "JRC"))
+                    labels = c("DSWE", "JRC"))  # plotly doesn't honor this 
 
+# Plot for display
 ggplotly(p, tooltip = c('huc8', 'cor')) %>% 
   add_annotations(text="Dataset", xref="paper", yref="paper",
                   x=1.02, xanchor="left",
@@ -318,8 +343,31 @@ ggplotly(p, tooltip = c('huc8', 'cor')) %>%
                   showarrow = FALSE) %>%
   layout(legend = list(y = 0.8, yanchor = "top"))
 
+# Plot for publication
+ #  ggplot(cor.huc.max, aes(x = reorder(huc8.img, -cor), y = cor, fill = type)) + 
+ #       geom_bar(stat = 'identity', position = position_dodge(), width = 0.75) +
+ #       geom_abline(slope = 0, intercept = cor_threshold, col = "black", lty = 2, size = 0.4) +
+ #       theme_bw(base_size = 8) +
+ #       theme(axis.text.x = element_text(angle = 65, hjust = 1, size = 7),
+ #             axis.text.y = element_text(size = 7),
+ #             legend.title = element_blank(),
+ #             legend.key.size = unit(0.8, 'line'),
+ #             legend.text = element_text(size = 7)) +
+ #       xlab('HUC') +
+ #       ylab('Correlation') +
+ #       scale_fill_manual(name = "Dataset", 
+ #                    values = c('#F8766D', '#00BFC4'), 
+ #                 #   values = c('orange', 'lightblue'),
+ #                    breaks = c("dswe", "pekel"),
+ #                    labels = c("DSWE", "JRC"))
+ # 
+ # ggsave(file = file.path(path.data, "plots", paste0("max correlation_withinHUC_", cor_type, ".pdf")),
+ #         width = 6.4, #7
+ #         height = 3.2, #4
+ #         units = "in",
+ #         dpi = 600)
 
-#p# to display with correct legend labels. If this line and the plotly are active, 2 plots show up
+
 ```
 
 ```{r, echo=FALSE, warning=FALSE, message = FALSE, include = FALSE}
@@ -365,19 +413,21 @@ pk_ds_sg.int %>%
 # Mean of the maximums correlations in each HUC, by group ####
 # ---------------------------------------------------------------------- #
 
+gage_thresh <- 6
+
 temp <- pk_ds_sg.int %>%
   filter(huc8.img == huc8.sg) %>%  # each gage will have data for either dataset
   distinct(huc8.img)  %>% 
   group_by(huc8.img, type) %>% 
   summarise(n_gages = n(),
             max_cor = max(cor)) %>%
-  mutate(cat = if(n_gages < 6) "N" else "Y") 
+  mutate(cat = if(n_gages < gage_thresh) paste0("< ", gage_thresh) else paste0(">= ", gage_thresh)) 
 
 temp %>% 
   group_by(type, cat) %>% 
   summarise(n_total = n(),
             cor = mean(max_cor)) %>%   
-  kable(col.names = c("Dataset", "More than 6 gages/HUC",  "# HUCs", 'Mean max cor'), digits = 3) %>%  
+  kable(col.names = c("Dataset", "Gages/HUC",  "# HUCs", 'Mean max cor'), digits = 3) %>%  
   kable_styling("striped", full_width = FALSE, position = 'left')
 
 ```
@@ -450,14 +500,14 @@ n_years <- 30
 
 pk_ds_sg.series <-   
   pk_ds_sg.int %>%
-  group_by(site_no, huc8.img, huc8.sg, type, cor) %>% 
+  group_by(site_no, huc8.img, huc8.sg, type, cor, p) %>% 
   summarize(n_months = n()) %>% 
   filter(n_months > 12 * n_years & cor > 0.7) %>% 
   group_by(huc8.img) %>% 
   slice(which.max(cor))
 
 pk_ds_sg.int.series <- 
-  inner_join(pk_ds_sg.series, pk_ds_sg.int, by = c("site_no", "huc8.img", "huc8.sg", "type", "cor"))
+  inner_join(pk_ds_sg.series, pk_ds_sg.int, by = c("site_no", "huc8.img", "huc8.sg", "type", "cor", 'p'))
 
 #write.csv(pk_ds_sg.int.series, file = "E:/projects/place/output/tables/pk_ds_sg_gt30years_and_corgt0pt7.csv", row.names = FALSE)
 
@@ -467,13 +517,13 @@ Internal-match HUCs with 30+ years of data and a correlation basis > 0.7. _Max c
 ```{r, echo = FALSE}
 
 pk_ds_sg.series %>% 
-  group_by(site_no, huc8.img, huc8.sg, type, cor) %>% 
+  group_by(site_no, huc8.img, huc8.sg, type, cor, p) %>% 
   filter(huc8.img == huc8.sg) %>% 
   group_by(huc8.img) %>% 
   slice(which.max(cor)) %>% 
-  distinct(site_no, huc8.img, huc8.sg, type, cor) %>% 
+  distinct(site_no, huc8.img, huc8.sg, type, cor, p) %>% 
   arrange(huc8.img, site_no) %>% 
-  kable(col.names = c("Gage", "Imagery HUC", "Gage HUC", "Dataset", 'Corr')) %>%  
+  kable(col.names = c("Gage", "Imagery HUC", "Gage HUC", "Dataset", 'Corr', 'p')) %>%  
   kable_styling("striped", full_width = FALSE, position = 'left') 
 
 
@@ -485,13 +535,13 @@ External-match HUCs with 30+ years of data and a correlation basis > 0.7. _Max c
 ```{r, echo = FALSE}
 
 pk_ds_sg.series %>% 
-  group_by(site_no, huc8.img, huc8.sg, type, cor) %>% 
+  group_by(site_no, huc8.img, huc8.sg, type, cor, p) %>% 
   filter(huc8.img != huc8.sg) %>% 
   group_by(huc8.img) %>% 
   slice(which.max(cor)) %>% 
-  distinct(site_no, huc8.img, huc8.sg, type, cor) %>% 
+  distinct(site_no, huc8.img, huc8.sg, type, cor, p) %>% 
   arrange(huc8.img, site_no) %>% 
-  kable(col.names = c("Gage", "Imagery HUC", "Gage HUC", "Dataset", 'Corr')) %>%  
+  kable(col.names = c("Gage", "Imagery HUC", "Gage HUC", "Dataset", 'Corr', 'p')) %>%  
   kable_styling("striped", full_width = FALSE, position = 'left') %>% 
     scroll_box(height = '400px', width = '450px')
 
@@ -636,6 +686,36 @@ ggplotly(p, tooltip = c('huc8', 'cor')) %>%
                   legendtitle = TRUE, 
                   showarrow = FALSE) %>%
   layout(legend = list(y = 0.8, yanchor = "top"))
+
+
+# Plot for publication
+ #  ggplot(cor.all.max, aes(x = reorder(huc8.img, -cor), y = cor, fill = type)) +
+ #       geom_bar(stat = 'identity', position = position_dodge(), width = 0.75) +
+ #       geom_abline(slope = 0, intercept = cor_threshold, col = "black", lty = 2, size = 0.4) +
+ #       theme_bw(base_size = 8) +
+ #       theme(axis.text.x = element_text(angle = 65, hjust = 1, size = 7),
+ #             axis.text.y = element_text(size = 7),
+ #             legend.title = element_blank(),
+ #             legend.key.size = unit(0.8, 'line'),
+ #             legend.text = element_text(size = 7)) +
+ #       xlab('HUC') +
+ #       ylab('Correlation') +
+ #       scale_fill_manual(name = "Dataset",
+ #                    values = c('#F8766D', '#00BFC4'),
+ #                 #   values = c('orange', 'lightblue'),
+ #                    breaks = c("dswe", "pekel"),
+ #                    labels = c("DSWE", "JRC"))
+ # 
+ # ggsave(file = file.path(path.data, "plots", paste0("max correlation_allHUC_", cor_type, ".pdf")),
+ #         width = 6.4, #7
+ #         height = 3.2, #4
+ #         units = "in",
+ #         dpi = 600)
+
+
+
+
+
 ```
 
 <br>
@@ -882,10 +962,6 @@ ds_sg.cor %>%
 
 plot_function  <- function(max_cor) {
   
-#  km2 <- round(max_cor$km2)
-#  plot.x.max <- max(pk_ds_sg.all$date)
-#  plot.y.max <- 0.95*max(pk_ds_sg.all$water)
-  
   huc_i <- max_cor$huc8.img
   site_i <- max_cor$site_no
   huc_name <- paste0("HUC ", huc_i, ", Site ", site_i)
@@ -918,9 +994,8 @@ plot_function  <- function(max_cor) {
         geom_line(size = .3, color = 'black') +
         geom_line(data = pk_ds_sg.inp, aes(date, water), color = 'red', size = .8) +
         geom_point(data = pk_ds_sg.all, aes(date, water, color = interp), size = 0.6) +  #all
-        scale_color_manual(values = c("black", "red"), labels = c("Measured data", "Estimated data")) + 
+        scale_color_manual(values = c("black", "red"), labels = c("Measured data", "Estimated data")) +
         theme_bw() +
-    #    annotate("text", x = as.Date(plot.x.max - 300, '%Y-%m-%d'), y = plot.y.max, label = paste0(km2, " km2")) +
         theme(plot.margin=unit(c(1, 1, 1, 1),"cm"),
           legend.position =  c(0.96, 1.04), #'top', 
           legend.justification = 'right',
