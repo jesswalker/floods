@@ -92,18 +92,19 @@ load(file.in)
 # Calculate correlations based on reduced data set (i.e., NA water values are not yet interpolated)
 # n is the number of months on which the correlation is based
 
-# pk_ds_sg.cor.all1 <- pk_ds_sg %>% 
-#   group_by(huc8.img, site_no, type) %>% 
-#   mutate(cor = cor(water, mean_va, use = "pairwise.complete.obs", method = cor_type),
-#             n = sum(!is.na(water))) 
+# original
+pk_ds_sg.cor.all <- pk_ds_sg %>%
+  group_by(huc8.img, site_no, type) %>%
+  mutate(cor = cor(water, mean_va, use = "pairwise.complete.obs", method = cor_type),
+            n = sum(!is.na(water)))
 
 # cor.test gives the p value as well
-pk_ds_sg.cor.all <- pk_ds_sg %>% 
-  group_by(huc8.img, site_no, type) %>% 
-  filter_at(vars(water), all_vars(sum(!is.na(.)) > 4)) %>% # may not be necessary; removes when # of NA water > 4
-  mutate(p = cor.test(water, mean_va, method = cor_type)$p.value,
-         cor = cor.test(water, mean_va, method = cor_type)$estimate,
-         n = sum(!is.na(water))) 
+# pk_ds_sg.cor.all <- pk_ds_sg %>% 
+#   group_by(huc8.img, site_no, type) %>% 
+#   filter_at(vars(water), all_vars(sum(!is.na(.)) > 4)) %>% # may not be necessary; removes when # of NA water > 4
+#   mutate(p = cor.test(water, mean_va, method = cor_type)$p.value,
+#          cor = cor.test(water, mean_va, method = cor_type)$estimate,
+#          n = sum(!is.na(water))) 
 
 rm(pk_ds_sg)
 
@@ -137,7 +138,8 @@ pk_ds_sg.cor.2 <- pk_ds_sg.cor.all %>%
 #### Ideally we would have the max correlations for both gages (DSWE and JRC) if they're not the same; that is,
 #### if the max corr for the JRC dataset in a given HUC is with gage X, we would also have the values for the 
 #### correlation of DSWE data with that gage. Currently, the final set only has the max correlation for
-#### each dataset, meaning the gages can be different.
+#### each dataset, meaning the gages can be different. Edit: changed such that all correlations are in the external
+#### gage dataset, so long as the correlations are > 0.5
 
 # pk_ds_sg.cor.2.max <- pk_ds_sg.cor.2 %>% 
 #  filter(cor == max(cor)) 
@@ -255,21 +257,21 @@ colnames(ds.sub)[2] <- 'water_ds'
 pk_ds.sub <- merge(pk.sub, ds.sub, by = c('date', 'huc8'))
 
 # cor.test gives the p value as well
-pk_ds.cor <- pk_ds.sub %>% 
-  group_by(huc8) %>% 
-  rename(huc8.img = huc8) %>% 
-  summarize(cor = cor.test(water_pk, water_ds, method = "pearson")$estimate,
-            p = cor.test(water_pk, water_ds, method = "pearson")$p.value, 
-            n_pekel = sum(!is.na(water_pk)),
-            n_dswe = sum(!is.na(water_ds))) # Used to look at correlation between data density and correlation
-
-# Calculate correlations (original)
 # pk_ds.cor <- pk_ds.sub %>% 
-#     group_by(huc8) %>% 
-#     rename(huc8.img = huc8) %>% 
-#     summarize(cor = cor(water_pk, water_ds, use = "pairwise.complete.obs", method = cor_type), 
+#   group_by(huc8) %>% 
+#   rename(huc8.img = huc8) %>% 
+#   summarize(cor = cor.test(water_pk, water_ds, method = "pearson")$estimate,
+#             p = cor.test(water_pk, water_ds, method = "pearson")$p.value, 
 #             n_pekel = sum(!is.na(water_pk)),
 #             n_dswe = sum(!is.na(water_ds))) # Used to look at correlation between data density and correlation
+
+# Calculate correlations (original)
+pk_ds.cor <- pk_ds.sub %>%
+    group_by(huc8) %>%
+    rename(huc8.img = huc8) %>%
+    summarize(cor = cor(water_pk, water_ds, use = "pairwise.complete.obs", method = "pearson"),
+            n_pekel = sum(!is.na(water_pk)),
+            n_dswe = sum(!is.na(water_ds))) # Used to look at correlation between data density and correlation
 
 rm(ds, ds.sub, pk.sub, pk_ds_sg.cor)
 ```
@@ -306,9 +308,9 @@ cor.huc.max <- pk_ds_sg.int %>%
 cor.huc.max %>%
   select(c(site_no, huc8.img, huc8.sg, type, cor, n)) %>% 
   arrange(huc8.img) %>% 
-  kable(col.names = c("Gage",  "Imagery HUC", "Gage HUC", "Dataset", "cor", "n" ), digits = 3) %>%  
+  kable(col.names = c("Gage",  "Imagery HUC", "Gage HUC", "Dataset", "cor", "n"), digits = 3) %>%  
   kable_styling("striped", full_width = FALSE, position = 'left') %>% 
-  scroll_box(height = '400px', width = '400px')
+  scroll_box(height = '400px', width = '450px')
 
 # Calculate max gage:imagery correlation for each HUC given all possible gages
 cor.all.max <- pk_ds_sg.int %>% 
@@ -350,9 +352,9 @@ cor.all.max$same_huc[cor.all.max$huc8.img != cor.all.max$huc8.sg] <- 'N'
 cor.all.max %>%
   select(c(site_no, huc8.img, huc8.sg, type, cor, n)) %>% 
   arrange(huc8.img) %>% 
-  kable(col.names = c("Gage",  "Imagery HUC", "Gage HUC", "Dataset", "cor", "n" ), digits = 3) %>%  
+  kable(col.names = c("Gage",  "Imagery HUC", "Gage HUC", "Dataset", "cor", "n"), digits = 3) %>%  
   kable_styling("striped", full_width = FALSE, position = 'left') %>% 
-  scroll_box(height = '400px', width = '400px')
+  scroll_box(height = '400px', width = '450px')
 
 ```
 
