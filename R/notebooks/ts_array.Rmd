@@ -1,0 +1,191 @@
+---
+title: "Pixel-based time series water analysis"
+fontsize: 9
+output: html_notebook
+editor_options:
+  chunk_output_type: inline
+---
+
+
+####Overview
+This script creates a vectorized tiff indictating whether a pixel was water for any month.
+Chris Konrad 2019
+Cosmetic modifications JWalker June 2019
+
+####Input
+Monthly surface water tiffs in which class 0 = No Data, class 1 = No Water, and class 2 = Water
+
+####Output
+  - 4-column array with row/column of pixel; month (as time step); and classification (water/non)
+  - Individual files with pixel coordinates and water/no water status
+
+```{r, echo = FALSE, warning = FALSE, message = FALSE}
+
+# ---------------------------------------------------------------------- #
+#### General setup ####
+# ---------------------------------------------------------------------- #
+
+# Paths
+path_data <- 'E:/projects/place/R/timeseries'
+path_tifs <- 'E:/projects/place/data/tifs'
+setwd(path_tifs)
+
+# Load packages in a way that's easy for others to as well
+load_packages <- function(pkgs){
+  for (pkg in pkgs){
+    #  require returns TRUE invisibly if it was able to load package
+    if(!require(pkg, character.only = TRUE)){
+      #  If package was not able to load, re-install
+      install.packages(pkg, dependencies = TRUE)
+      #  Load package after installing
+      require(pkg, character.only = TRUE)
+    }
+  }
+}
+
+# Load packages
+load_packages(c("abind", 
+                "sp", 
+                'raster',
+                'rgdal',  #v1.4-4
+                'tictoc'))
+```
+
+```{r, echo = FALSE}
+
+# ---------------------------------------------------------------------- #
+#### General info ####
+# ---------------------------------------------------------------------- #
+
+allhucs <- c('18020003')
+
+coords_huc <- data.frame(huc = character(),
+                         lon = numeric(),
+                         lat = numeric())
+
+# Constants
+yr_start <- 1985
+yr_end <- 2015
+yrs <- seq(yr_start, yr_end)
+mm <- c('01','02','03','04','05','06','07','08','09','10','11','12') #c(paste0('0', seq(1, 9)), seq(10, 12))
+nts <- 370 # Number of months in time series
+np <- NA # Number of pixels
+
+# Sequential list of all months padded with zeros to 3 digits (e.g., '001')
+ts_labels <- sprintf("%03d", seq(1:(12 * (yr_end - (yr_start - 1)))))
+
+```
+
+
+```{r, echo=FALSE, warning = FALSE}
+
+# ---------------------------------------------------------------------- #
+#### Process each HUC ####
+# ---------------------------------------------------------------------- #
+
+#SURFACE WATER TIME SERIES FROM 1985-01 to 2015-10, TIF FOR 2013-06 IS BAD
+for (h in 1:length(allhucs)) {
+  
+#process_hucs <- function(huc) {  # not sure why this wouldn't work
+  
+  huc <- allhucs[h]
+  tic('loop for huc')
+  
+# Generate filenames for each month/year combination (e.g. '18020002/monthly_water_1985_01_18020002.tif') to import files
+  filenames <- sapply(yrs, function(y) sapply(mm, function(m) paste0(huc, '/monthly_water_', y, '_', m, '_', huc, '.tif')))
+  filenames <- filenames[1:nts] # This indexing only works as long as the first year is complete and the last is incomplete
+  filenames <- filenames[-342] # BAD TIFF!
+  
+# Generate matching year/month array (e.g. '1985_01') as rownames
+  yr_mn <- sapply(yrs, function(y) sapply(mm, function(m) paste0(y, '_', m)) ) # generate labels
+  yr_mn <- yr_mn[1:nts]
+  yr_mn <- yr_mn[-342]
+  
+# Generate array with number of dry/wet pixels in each month
+  ts_sum <- array(NA, dim = c(0, 3)) 
+
+# Generate tif index with row and column indices for vectorized tiff
+# Pixel order: row 1 col 1, 2, ...n; row 2 col 1, 2, ...n; ... 
+#  rasters <- lapply(file.path(path_tifs, filenames), raster) # bombs otherwise
+  tmp <- raster(file.path(path_tifs, filenames[1]))
+  nr <- dim(tmp)[[1]] 
+  nc <- dim(tmp)[[2]]
+  
+  tiff_index <- rep(c(1:nr), nc)
+  tiff_index <- sort(tiff_index) # sorts rows into 1,1,..,1,2,2...2,...
+  tiff_index <- cbind(tiff_index, rep(c(1:nc), nr))
+
+# Get LL corner coordinates
+  coords_huc <- rbind(coords_huc, c(huc, extent(tmp)[1], extent(tmp)[3]))
+  
+# Vectorize raster
+  tmp <- as.vector(tmp)  
+  np <- sum(!is.na(tmp)) # number of actual data values
+
+# Create logical vector showing whether a pixel had water in any month to ID pixels to model
+# If binary vector is TRUE OR any of the other vectors == 2, that spot gets a TRUE for water
+# **Tried to unloop/sapply but bombs due to data volume**
+  water_any_ts <- (tmp == 2)  # 2 is the water class
+  for (ts in 2:length(filenames)) {
+      water_any_ts <<- (water_any_ts | (as.vector(raster(file.path(path_tifs, filenames[ts]))) == 2))
+  }
+
+# Vectorize tiffs and compile in tmp: rows are pixels; cols are raster rows/cols/ts code/classification code
+  for (ts in 1:length(filenames)) {
+       tmp <- cbind(tiff_index, ts, as.vector(raster(file.path(path_tifs, filenames[ts])))) 
+       tmp[tmp[, 4] == 0] <- NA # Change code 0 to NA 
+       tmp[!water_any_ts, 4] <- NA # Change any non-water pixels to NA
+       tmp <- tmp[complete.cases(tmp), ] # Remove rows (pixels) that were dry in that month
+
+# Array with time-series of wet/dry (cols) for each pixel (row): tsXXX where XXX is serial code for month from 001 to 370
+       assign(paste0('ts', ts_labels[ts]), tmp, envir = .GlobalEnv)
+
+# ts_sum summarizes results for each month in rows
+# Columns: # of unclassified pixels in HUC, # of dry pixels, and # of wet pixels
+# ** Replication of what we aggregate through GEE **
+       tmp1 <- sum(tmp[, 4] == 1, na.rm = TRUE)
+       tmp2 <- sum(tmp[, 4] == 2, na.rm = TRUE)
+       ts_sum <- rbind(ts_sum, c(np - tmp1 - tmp2, tmp1, tmp2))
+
+  } # Close ts loop
+
+# Set coordinate df names 
+ names(coords_huc) <- c("huc", "lon", "lat")
+
+# Set rownames as year/month
+ dimnames(ts_sum)[[1]] <- yr_mn
+  
+# Clean up 
+ rm(tmp, tmp1, tmp2, ts)  #mm, nts
+
+# Create directory for timeseries
+ dir.create(file.path(path_data, huc))
+ 
+# Save data to Rdata file 
+ save.image(file.path(path_data, huc, paste0('ts_array_', huc, '.Rdata')))
+
+# Write out data
+ write(paste0('*** Completed HUC ', huc), '')
+  
+} # Close HUC loop
+
+
+
+
+
+```
+
+
+```{r, echo = FALSE, warning=FALSE}
+
+#sapply(allhucs, function(x) process_hucs(x))
+
+rm(mm, nts)
+toc()
+
+```
+
+
+
+#  c(-121.583291, 40.812260), #HUC 18020002
+#  c(-122.370214, 40.45194)) #HUC18030003

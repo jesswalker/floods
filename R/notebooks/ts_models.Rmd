@@ -1,0 +1,120 @@
+---
+title: "Modeling streamflow vs. imagery"
+fontsize: 9
+output: html_notebook
+editor_options:
+  chunk_output_type: inline
+---
+
+
+
+```{r}
+
+# Paths
+path_data <- 'E:/projects/place/R/timeseries'
+path_tables <- 'E:/projects/place/data/tables'
+setwd(path_tifs)
+
+# Load saved data
+load(file.path(path_data, huc, paste0('ts_array_', huc, '.Rdata')))
+
+# Load packages
+loadPackages(c("abind", 'raster', 'tictoc'))
+
+# List of HUCs that have saved data
+allhucs <- c('18020002','18030003')
+
+# Gage to use for each HUC
+allhucs_gages <- c('11348500', '11365000')
+
+# Coordinates of LL corner
+allhucs_corner_LL <- rbind(
+  c(-121.583291, 40.812260), #HUC 18020002
+  c(-122.370214, 40.45194)) #HUC18030003
+
+cellsize = 0.000269
+
+# Monthly streamflow data
+allhucs_q <- read.csv(file.path(path_tables, 'sg_centralvalley.csv'), header=TRUE)
+
+tic('loop for huc')
+
+
+
+  
+```
+
+```{r, echo=FALSE}
+
+#HUC LOOP
+
+
+for (h in 1:length(allhucs)) {
+
+# Array water_ts: each row is logical time series (true = water) for a pixel
+  
+# Workspace with monthly dry/wet for each pixel
+# Load data file from ts_array.Rmd  
+load(file.path(path_data, huc, paste0('ts_array_', huc, '.Rdata')))
+
+# 
+nts <- dim(ts_sum)[[1]]
+corner_LL <- allhucs_corner_LL[h]
+
+# Extract streamflow data for HUC
+q <- allhucs_q[allhucs_q$site_no == allhucs_gages[huc], c(1:5)] 
+q <- q[match(yr_mn, paste0(substr(q$date, 1, 4), '_', substr(q$date, 6, 7))), ]
+
+# Water index has row/col indices for water pixels in which water existed in that month
+water_index <- tiff_index[water_any_ts, ] 
+water_index <- water_index[complete.cases(water_index), ]
+dimnames(water_index)[[1]] <- water_index[, 2] + (water_index[, 1] - 1) * nc
+
+# Create array with time series for each water pixel
+wats <- sum(water_any_ts, na.rm = TRUE) #Number of pixels with water in any time step
+water_ts <- array(NA, dim = c(wats, nts))
+dimnames(water_ts)[[1]] <- water_index[, 2] + (water_index[, 1] - 1) * nc
+
+# Get logical array (true = water) for each time step
+for (ts in 1:nts) {
+    tmp <- get(paste0('ts', ts_labels[ts]))
+    x <- as.character(tmp[, 2] + (tmp[, 1] - 1) * nc) #VECTOR INDEX FOR TIME-SERIES ARRAY
+    w <- tmp[, 4] == 2 
+    w[tmp[, 4] == 0] <- NA #w IS LOGICAL VECTOR FOR WATER
+    water_ts[x, ts] <- w
+}
+
+# Vector with minimum fraction of correct classification for wet and dry pixels at p = 0.5
+# Performance metric accounts for transitions in pixels that are mostly wet or dry
+correct_class <- rep(NA, wats)
+freq_water <- rep(NA, wats)
+
+# Calibrate model for each pixel p: water_ts[p, ] ~ q
+for (p in 1:wats) {
+    tmp.water_pix <- water_ts[p, complete.cases(water_ts[p, ])] # Time series of water for pixel p
+    tmp.q <- q[complete.cases(water_ts[p, ]), 3] #Time series of flow
+    pixel_mod = glm(tmp.water_pix~tmp.q, family = binomial(link = logit)) #Logistic model
+    tmp.correct_dry <- sum((pixel_mod$fitted.values < 0.5) & !tmp.water_pix)/sum(!tmp.water_pix, na.rm = TRUE)
+    tmp.correct_wet <- sum((pixel_mod$fitted.values > 0.5) & tmp.water_pix)/sum(tmp.water_pix, na.rm = TRUE) 
+    correct_class[p] <- min(tmp.correct_dry,tmp.correct_wet,na.rm=TRUE)#MODEL PERFORMANCE IS MINIMUM OF CORRECT CLASSIFACTION
+    freq_water[p] <- sum(tmp.water_pix)/length(tmp.water_pix)}
+
+    tmp <- matrix(NA, ncol = nc, nrow = nr)
+    tmp[water_index] <- round(255*correct_class, digits=0)
+
+    corner_LL <- allhucs_corner_LL[h, ]
+    corner_UR <- corner_LL + cellsize * c(nc, nr)
+
+    correct_class.raster <- raster(tmp, xmn = corner_LL[1], ymn = corner_LL[2], xmx = corner_UR[1], ymx = corner_UR[2])
+
+    writeRaster(correct_class.raster, paste0(huc,'/correct_class_', huc, '.tiff'), format = 'GTiff', overwrite=TRUE)
+
+    save(list <- c('freq_water', 'correct_class', 'corner_LL','cellsize','nr','nc','pixel_mod'),file = paste0(huc,'/ts_models_',huc,'.Rdata'))
+
+    pdf(file = paste(huc,'/correct_class_',huc,'.pdf',sep=''), height=5, width=5)
+    plot(freq_water, correct_class, xlab = 'Frequency of Water in Pixel', ylab = 'Correct Classification at p > 0.5', pch = 19, col = gray(0.5,0.25), cex=0.1)
+    dev.off()
+}
+
+
+```
