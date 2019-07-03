@@ -60,7 +60,7 @@ nodata_threshold <- 5
 #### Set files and folders ####
 # ---------------------------------------------------------------------- #
 
-cor_type <- 'spearman' #pearson' #'kendall' # 'pearson' 'spearman' 
+cor_type <- 'spearman' #pearson' #'kendall' 
 
 path.data <-  "E:/projects/place/data"
 
@@ -139,12 +139,12 @@ pk_ds_sg.cor.2 <- pk_ds_sg.cor.all %>%
 #### if the max corr for the JRC dataset in a given HUC is with gage X, we would also have the values for the 
 #### correlation of DSWE data with that gage. Currently, the final set only has the max correlation for
 #### each dataset, meaning the gages can be different. Edit: changed such that all correlations are in the external
-#### gage dataset, so long as the correlations are > 0.5
+#### gage dataset, so long as the correlations are > 0.3
 
 # pk_ds_sg.cor.2.max <- pk_ds_sg.cor.2 %>% 
 #  filter(cor == max(cor)) 
 
-# Combine - all correlations for imagery HUC = sg HUC, max corr for imagery HUC != sg HUC
+# Combine - all correlations for imagery HUC = sg HUC, all corr for imagery HUC != sg HUC where cor > 0.3
  pk_ds_sg.cor <- bind_rows(pk_ds_sg.cor.1, pk_ds_sg.cor.2) #.max)
 
  rm(pk_ds_sg.cor.1, pk_ds_sg.cor.2, pk_ds_sg.cor.all)
@@ -245,6 +245,8 @@ end_time - start_time
 #### Get JRC/DSWE correlations ####
 # ---------------------------------------------------------------------- #
 
+### Hardwired to use Pearson correlation
+
 # JRC (Pekel data)
 pk.sub <- pk[, c('date', 'water', 'huc8')]
 colnames(pk.sub)[2] <- 'water_pk'
@@ -256,14 +258,14 @@ colnames(ds.sub)[2] <- 'water_ds'
 # Merge the two!
 pk_ds.sub <- merge(pk.sub, ds.sub, by = c('date', 'huc8'))
 
-# cor.test gives the p value as well
-# pk_ds.cor <- pk_ds.sub %>% 
-#   group_by(huc8) %>% 
-#   rename(huc8.img = huc8) %>% 
-#   summarize(cor = cor.test(water_pk, water_ds, method = "pearson")$estimate,
-#             p = cor.test(water_pk, water_ds, method = "pearson")$p.value, 
-#             n_pekel = sum(!is.na(water_pk)),
-#             n_dswe = sum(!is.na(water_ds))) # Used to look at correlation between data density and correlation
+#### Uncomment to run cor.test and get the p value as well
+pk_ds.cor <- pk_ds.sub %>%
+  group_by(huc8) %>%
+  rename(huc8.img = huc8) %>%
+  summarize(cor = cor.test(water_pk, water_ds, method = "pearson")$estimate,
+            p = cor.test(water_pk, water_ds, method = "pearson")$p.value,
+            n_pekel = sum(!is.na(water_pk)),
+            n_dswe = sum(!is.na(water_ds))) # Used to look at correlation between data density and correlation
 
 # Calculate correlations (original)
 pk_ds.cor <- pk_ds.sub %>%
@@ -285,9 +287,10 @@ rm(ds, ds.sub, pk.sub, pk_ds_sg.cor)
 
 # 1st order
 pk_ds_sg.int$water <- ifelse(is.na(pk_ds_sg.int$water), pk_ds_sg.int$mean_va * pk_ds_sg.int$m + pk_ds_sg.int$b, pk_ds_sg.int$water)
+pk_ds_sg.int$water <- ifelse(pk_ds_sg.int$water < 0, 0, pk_ds_sg.int$water)
 
 # 2nd order
- pk_ds_sg.int2$water <- ifelse(is.na(pk_ds_sg.int2$water), pk_ds_sg.int2$b + pk_ds_sg.int2$mean_va * pk_ds_sg.int2$m + pk_ds_sg.int2$mean_va^2 * pk_ds_sg.int2$m2, pk_ds_sg.int2$water)
+pk_ds_sg.int2$water <- ifelse(is.na(pk_ds_sg.int2$water), pk_ds_sg.int2$b + pk_ds_sg.int2$mean_va * pk_ds_sg.int2$m + pk_ds_sg.int2$mean_va^2 * pk_ds_sg.int2$m2, pk_ds_sg.int2$water)
 
 ```
 
