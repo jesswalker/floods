@@ -1,5 +1,5 @@
 ---
-title: "Stream gage correlations with JRC and DSWE data in California's Central Valley - Results"
+title: "Stream gage correlations with JRC and DSWE data in California's Central Valley - Result and plots"
 fontsize: 9
 output: html_notebook
 editor_options:
@@ -17,25 +17,34 @@ editor_options:
 #### General setup ####
 # ---------------------------------------------------------------------- #
 
-# Load packages in a way that's easy for others to as well
-
+# Function: Load packages
 loadPackages <- function(pkgs){
   for (pkg in pkgs){
-    #  require returns TRUE invisibly if it was able to load package
     if(!require(pkg, character.only = TRUE)){
-      #  If package was not able to load, re-install
       install.packages(pkg, dependencies = TRUE)
-      #  Load package after installing
       require(pkg, character.only = TRUE)
     }
   }
 }
 
 # Load packages
-loadPackages(c("dataRetrieval", "plyr", "tidyverse", 'data.table', 'knitr', 'kableExtra', 'devtools', 'googledrive', 'zoo'))
+loadPackages(c("dataRetrieval", # 2.7.4
+               "plyr",          # 1.8.4
+               "tidyverse",     # 1.2.1
+               'data.table',    # 1.12.0
+               'knitr',         # 1.21
+               'kableExtra',    # 1.0.1
+               'devtools',      # 2.0.1
+               'googledrive',   # 0.1.3
+               'zoo'))          # 1.8-4
 
 # Load mapping packages
-loadPackages(c("ggmap", "sf", "maps", "mapdata", 'rgdal', 'plotly'))
+loadPackages(c("ggmap",         # 3.0.0
+               "sf",            # 0.7-3
+               "maps",          # 3.3.0
+               "mapdata",       # 2.3.0
+               'rgdal',         # 1.4-4
+               'plotly'))       # 4.8.0
 
 # Set default as echo FALSE
 knitr::opts_chunk$set(echo = FALSE)
@@ -142,8 +151,8 @@ shp <- st_read(dsn = file.path(shp.dir, shp.name), stringsAsFactors = F)
 
 ####Inputs
 
-  - R image file generated from **process_gage_discharge_pekel_dswe2_correlations_by_CV_huc.Rmd** (`r file.path(path.data, "data")`)
-  - Shapefile of Central Valley HUCs (Google Drive)
+  - R image file generated from **process_gage_discharge_pekel_dswe2_correlations_by_CV_huc.Rmd** stored locally on `r file.path(path.data, "data")`
+  - Shapefile of Central Valley HUCs stored on ScienceBase (Google Drive placeholder for now)
   
 
 ####Outputs
@@ -1125,7 +1134,7 @@ plot_function  <- function(max_cor) {
           legend.title = element_blank(),
           legend.background = element_rect(fill = NA)) +
         xlab("Date") +
-        ylab('Monthly extent (sq km)')  +
+        ylab('Surface water extent (sq km)')  +
         ggtitle(huc_name) +
     
 #legacy code for incorporating water data
@@ -1165,7 +1174,6 @@ plot_function  <- function(max_cor) {
 #### plots for publication 
 ## *************************
 
-
 plot_function_pub  <- function(max_cor) {
   
   huc_i <- max_cor$huc8.img
@@ -1184,8 +1192,7 @@ plot_function_pub  <- function(max_cor) {
 # combine all and recorded 
   pk_combined <- rbind(pk_ds_sg.all, pk_ds_sg.rec)
  
-# change names
-# thanks, ttps://stackoverflow.com/questions/3472980/ggplot-how-to-change-facet-labels
+# assign names
   imagery.names <-  list('dswe'= "DSWE", 'pekel' = 'JRC')
   imagery_labeller <- function(variable, value){
     return(imagery.names[value])}
@@ -1215,7 +1222,7 @@ plot_function_pub  <- function(max_cor) {
           legend.key.size = unit(0.7, 'line'),
           legend.key.width = unit(0.9, 'line')) +
         xlab("Date") +
-        ylab('Monthly extent (sq km)')  +
+        ylab('Surface water extent (sq km)')  +
         ggtitle(huc_name) +
 
       facet_grid(type ~ ., labeller = imagery_labeller, switch = 'y') +
@@ -1248,11 +1255,10 @@ plot_function_pub  <- function(max_cor) {
 #### Generate subset of gage::imagery time-series plots for publication
 # ---------------------------------------------------------------------- #
 
-
 pk_ds_sg.int %>% 
     filter(huc8.sg == huc8.img) %>% 
-    filter(huc8.img == '18040010') %>% 
-    #filter(huc8.img %in% c('18020004', '18020002', '18040010')) %>% 
+    #filter(huc8.img == '18040010') %>% 
+    filter(huc8.img %in% c('18020004', '18020002', '18040010')) %>% 
     group_by(huc8.img) %>% 
     slice(which.max(cor))  %>% 
     do(df.select = plot_function_pub(.)) # 'do' to pass the groups individually; 'df.select' b/c a name is necessary for some reason
@@ -1287,7 +1293,6 @@ pk_ds_sg.int %>%
 ####Interpolated plots - all HUCs
 ```{r, echo= FALSE, warning = FALSE, message = FALSE, progress_bar = FALSE, fig.height=7, fig.width=8}
 
-# OMG this is kludgy and inefficient. 
 # This can be rewritten such that the pk_ds_sg calls are dropped--the incoming data is already partitioned from that data frame. Leaving it for now because it works.
 
 plot_function_all  <- function(max_cor) {
@@ -1333,7 +1338,7 @@ plot_function_all  <- function(max_cor) {
           legend.title = element_blank(),
           legend.background = element_rect(fill = NA)) +
         xlab("Date") +
-        ylab('Monthly extent (sq km)')  +
+        ylab('Surface water extent (sq km)')  +
         ggtitle(huc_name) +
     
 #legacy code for incorporating water data
