@@ -1,6 +1,8 @@
 ---
-title: "Process and merge stream gage data with JRC and DSWE data in California's Central Valley"
-fontsize: 9
+title: "Process and merge stream gage data with JRC and DSWE imagery in California's Central Valley"
+fontsize: 8
+author: Jessica Walker
+date: 7/19/19
 output: html_notebook
 editor_options:
   chunk_output_type: inline
@@ -8,103 +10,88 @@ editor_options:
 ```{r, echo=FALSE}
 
 ## ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-## 1_process_and_merge_gage_jrc_dswe_in_CV_hucs.Rmd
+## 1_process_and_merge_data.Rmd
 ## ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 ```
-
 
 
 ```{r, echo = FALSE, include = F, results = 'hide'}
 
 # ---------------------------------------------------------------------- #
-#### Set output files and folders ####
+####  *********  USER INPUT HERE ***********
 # ---------------------------------------------------------------------- #
 
-path.out <- "E:/projects/place/data"
+# Set threshold for maximum percent of no data pixels
+nodata_threshold <- 5
 
-file.out <- paste0("CV_dswe_jrc_gage_", nodata_threshold, "pct_nodata_merged.RData")
-
+# Set files and folders 
+# - Output file is written to path.out
+path.out <-  "E:/projects/place/data"
+file.out <- paste0("merged_imagery_gage_", nodata_threshold, "pct.RData")
 
 ```
 
 
-
 ```{r, echo=FALSE, warning=FALSE, message=FALSE}
 
-## ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-## 1_process_and_merge_gage_jrc_dswe_in_CV_hucs.Rmd
-## ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 # ---------------------------------------------------------------------- #
 # General setup ####
 # ---------------------------------------------------------------------- #
 
-# Load packages in a way that's easy for others to as well
+# Load packages
 loadPackages <- function(pkgs){
   for (pkg in pkgs){
-    #  require returns TRUE invisibly if it was able to load package
     if(!require(pkg, character.only = TRUE)){
-      #  If package was not able to load, re-install
       install.packages(pkg, dependencies = TRUE)
-      #  Load package after installing
       require(pkg, character.only = TRUE)
     }
   }
 }
 
-# Load packages
 loadPackages(c("data.table", # v1.12.0; fread
                "tidyverse")) # v1.2.1 
 
 ```
 
 
-```{r, echo = FALSE}
-
-# ---------------------------------------------------------------------- #
-#### Set NoData threshold ####
-# ---------------------------------------------------------------------- #
-
-nodata_threshold <- 5
-
-```
-
-
 ####Workflow 
-  - Retrieve JRC and DSWE monthly composites in Central Valley HUCs from Google Drive 
-    - Pre-process and convert data
+  - Retrieve Joint Research Commission Monthly Water History v1.0 (JRC) and Dynamic Surface Water Extent (DSWE) 1984-2015 monthly composites in Central Valley HUCs from ScienceBase (Google Drive placeholder)
+    - Pre-process data for consistent format, unit conversions, and missing values
     - In scenes with > **`r nodata_threshold`%** No Data, zero out water values pending interpolation
   - Retrieve metadata from NWIS for all Central Valley gages
-    - Filter for data and temporal requirements
+  - Filter gages for data and temporal requirements
   - Retrieve monthly data from qualifying gages
   - Combine stream gage, JRC, and DSWE data for all HUCs
+  
+####User actions required
+  - Specify valid local directory for output file
 
 ####Inputs
-  - JRC monthly composites aggregated by Central Valley HUC
-  - DSWE monthly composites aggregated by Central Valley HUC
-  - NWIS metadata for all Central Valley gages
+  - *All data are retrieved from online sources*
+  - JRC monthly composites aggregated by Central Valley HUC 
+  - DSWE monthly composites aggregated by Central Valley HUC 
+  - NWIS metadata for all Central Valley gages 
   - NWIS monthly records for gages meeting temporal and data requirements
 
 ####Output
-  - Consolidated file of monthly stream gage, JRC, and DSWE values written to **`r file.path(path.out, 'data', file.out)`**
+  - Consolidated file of monthly stream gage, JRC, and DSWE values written to **`r file.path(path.out, file.out)`**
 
-####User inputs required
-  - Valid local directory for output file
+
  
 
 ```{r, echo = FALSE}
 
 # ---------------------------------------------------------------------- #
-# ------ Function - Process JRC data ---------
+#  ------ Function - Process JRC data ---------
 # ---------------------------------------------------------------------- #
 
 process_jrc <- function(df, nodata_cap) {
   
   df$date <- as.Date(df$date, format = "%Y-%m-%d")
-
-# Process file  
+  
   df <- df %>% 
-    slice(-1) %>% 
+    slice(-1) %>% # First row is nonsense
     select(date, huc8, nodata = X0, notwater = X1, water = X2)
 
 # Convert from pixels in m^2 to km^2: 900 m^2/pixel x 1e-06 km^2/m^2
@@ -112,12 +99,13 @@ process_jrc <- function(df, nodata_cap) {
   df$notwater <- df$notwater * 0.0009  
   df$nodata <- df$nodata * 0.0009  
 
-# Convert "water" --> NA in rows where nodata exceeds <threshold>% of the total
+# Convert "water" --> NA in rows where nodata > x% of the total imaged data
   df$sum <- rowSums(df[, c("nodata", "notwater", "water")], na.rm = T)
   df$pct <- df$nodata/df$sum * 100
   df$water[df$pct > nodata_cap] <- NA
 
 return(df)
+  
 }
 
 ```
@@ -152,7 +140,7 @@ process_dswe <- function(df, nodata_cap) {
 # X0 = no data, # X1 = not water # X2 = water (high), X3 = water(low conf), X4 = wetland, X5 = water/wetand (low), nodata = clouds, etc., null = no data was present
   colnames(df) <- c("name", 'huc8', "notwater", "water", "water2", "water3", "water4", "nodata", "null", "sqkm")
 
-  df <-  df %>% 
+  df <- df %>% 
     mutate_if(is.factor, as.character) %>%   # Convert name to character
     slice(-1)                                # Remove nonsense 1st row 
 
@@ -239,7 +227,7 @@ pk_ds <- rbind(pk, ds)
 #### Stream gage - get gage metadata for CV HUCs ####
 # ---------------------------------------------------------------------- #
 
-# This step will narrow the list of desired gages based on the data available in each
+# This step narrows the list of desired gages based on the data available in each
 
 hucs_all <- c('18020002', '18020003','18020004', '18020005', '18020104', '18020111', '18020115',
 '18020116', '18020121', '18020122', '18020123', '18020125', '18020126', '18020128', '18020129', '18020151',
@@ -258,11 +246,7 @@ g <- do.call(rbind, lapply(hucs_all, site_info))
 
 ```
 
-####Gage criteria
 
-Even when the gage data criteria are set correctly, the amount of data retrieved might be off. Site 11201800, for instance, has a start date of of 1908-10-01 and an end date of 1995-09-04.  That qualifies under the criteria of at least 5 years of data after 1984.  But looking at the data reveals that there are only daily values recorded from 1908-1912, and then a few from 1994 onward.
-
-Site 11451720 supposedly has data from 1958 to present, but in fact it stops in 1980 before briefly picking up again for two weeks at the end of 1997. 
 
 ```{r, echo = FALSE, warning = FALSE, message = FALSE}
 
@@ -299,7 +283,6 @@ site_info <- g %>%
   mutate(lat = as.numeric(lat), 
          lon = as.numeric(lon))
   
-
 ```
 
 
@@ -352,7 +335,7 @@ sg <- sg %>%
   group_by(site_no) %>%                                 # Remove gages in which
       filter(length(unique(mean_va)) > 1) %>%           # - all values are the same
       filter(mean_va >= 0) %>%                          # - gage values are negative
-      filter(n() > 60) %>%                              # - < 5 yrs of overlapping data exist
+      filter(n() > 60) %>%                              # - < 5 yrs (60 months) of overlapping data exist
   ungroup() %>%                                       # Assign factors   
   mutate(site_no = factor(site_no),
          parameter_cd = factor(parameter_cd),
