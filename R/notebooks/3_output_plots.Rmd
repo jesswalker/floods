@@ -30,15 +30,16 @@ nodata_threshold <- 5
 cor_type <- 'spearman' 
 
 # Set files and folders 
-# - Plots are saved to path.data/plots
-# - Input file is read from path.data/data/
-# - Shapefile is read to path.data/R/shp 
+# - Input file is read from path.data
+# - Plots are saved to path.plots
+# - Shapefile saved to path.data/shp 
 
-path.data <-  "E:/projects/place"
-file.in <- file.path(path.data, "data", paste0("CV_imagery_gage_", nodata_threshold, 'pct_', cor_type, ".RData"))
+path.data <-  "E:/projects/place/data"
+path.plots <- "E:/projects/place/plots"
+file.in <- file.path(path.data, paste0("CV_imagery_gage_", nodata_threshold, 'pct_', cor_type, ".RData"))
 
 # Set path to shapefile directory; create if non-existent
-shp.dir <- file.path(path.data, "R", "shp")
+shp.dir <- file.path(path.data, "shp")
 ifelse(!dir.exists(shp.dir), dir.create(shp.dir), FALSE)
 
 ```
@@ -64,20 +65,6 @@ loadPackages <- function(pkgs){
 }
 
 # Load packages
-
-# loadPackages(c('dataRetrieval', 
-#                'plyr', 
-#                'tidyverse',
-#                'data.table',
-#                'knitr',
-#                'kableExtra', 
-#                'devtools',
-#                'googledrive',
-#                'zoo',  
-#                'ggmap', 
-#                'sf' ))
-
-
 loadPackages(c('dataRetrieval', # 2.7.4
                'plyr',          # 1.8.4
                'tidyverse',     # 1.2.1
@@ -89,14 +76,6 @@ loadPackages(c('dataRetrieval', # 2.7.4
                'zoo',           # 1.8-4
                'ggmap',         # 3.0.0
                'sf' ))        # 0.7-3
-
-        #       'maps',          # 3.3.0
-        #       'mapdata',       # 2.3.0
-        #       'rgdal',         # 1.4-4
-        #       'plotly'
-#        ))       # 4.8.0
-
-
 ```
 
 
@@ -147,24 +126,22 @@ shp <- st_read(dsn = file.path(shp.dir, shp.name), stringsAsFactors = F)
 
 
 ####Workflow
-
 * Load R image file of correlations between stream gage info and JRC/DSWE data
+* Download shapefile of study area HUCs to `r file.path(path.data, "shp")`.  shp folder is created if it doesn't already exist
 * Calculate and/or plot relevant statistics
   - Discharge/imagery correlation type: **`r toupper(cor_type)`** 
   - Clear-pixel threshold value: **`r nodata_threshold`**%
 
+####User actions required
+  - Specify valid local directories for input and output files
 
 ####Inputs
-
-  - User input in script necessary to change directories from default settings
-  - R image file generated from **process_gage_discharge_pekel_dswe2_correlations_by_CV_huc.Rmd** stored locally on `r file.path(path.data, "data")`
+  - R image file generated from **2_calculate_correlations.Rmd** stored locally on `r file.path(path.data)`
   - Shapefile of Central Valley HUCs stored on ScienceBase (Google Drive placeholder for now)
   
-  
 ####Outputs
-
   - In-line results
-  - Plots of augmented JRC and DSWE time series based on within- and external-HUC gage correlations to **`r file.path(path.data, "plots")`**
+  - Plots of augmented JRC and DSWE time series based on within- and external-HUC gage correlations to **`r file.path(path.plots)`**
   
 <br>  
 
@@ -179,19 +156,18 @@ shp <- st_read(dsn = file.path(shp.dir, shp.name), stringsAsFactors = F)
 
 shp %>% 
 ggplot() + 
+  theme_nothing() +
   geom_sf(aes(fill = HUC8), show.legend = FALSE) +  
   theme_bw()  +
   coord_sf(crs = "+init=epsg:4269")  
   coord_sf(crs = st_crs(26910)) # set UTM zone 10 projection
-#suppressMessages(print(p))  # still isn't working
+  
   
 ```
   
 
   
 ####NoData proportions
-
-JRC and DSWE data show different proportions of NoData pixels (clouds, cloud shadows, or snow). In general, DSWE data have lower proportions of contaminated pixels. A seasonal breakdown shows that DSWE winter and fall images tend to have more "workable" data than JRC images. The quality of that data is unknown, however. 
 
 ```{r, echo = F, warning = FALSE}
 
@@ -231,7 +207,7 @@ ggplot(pk_ds_season, aes(season, pct, color = type)) +
 #   ylab("% NoData pixels") +
 #   scale_color_discrete(name = "Dataset", breaks = c("dswe", "pekel"), labels = c("DSWE", "JRC"))
 # 
-# ggsave(file = file.path(path.data, "plots", paste0("nodata_pixels.pdf")),
+# ggsave(file = file.path(path.plots, paste0("nodata_pixels.pdf")),
 #         width = 4.5, #7
 #         height = 2.8, #4
 #         units = "in",
@@ -317,10 +293,10 @@ Within-HUC correlations greater than `r cor_threshold` - max r in each HUC
 # Number of within-HUC MAXIMUM correlations above threshold ####
 # --------------------------------------------------------
 
-# This looks only at the group of maximum correlations in each HUC
+# This looks only at the maximum correlation in each HUC per imagery dataset
 # Currently hard-coded value for the number of HUCs (49, since 1 HUC had no qualifying gage data)
 
-# cor.huc.max: dataset with the maximum correlation in each HUC when gage and imagery are co-located in a HUC
+# cor.huc.max: maximum correlation in each HUC (per imagery dataset) when gage and imagery are co-located in a HUC
 cor.huc.max %>% 
   group_by(type) %>%
   filter(cor > cor_threshold) %>% 
@@ -389,7 +365,7 @@ ggplot(cor.huc.max, aes(x = reorder(huc8.img, -cor), y = cor, fill = type)) +
  #                    breaks = c("dswe", "pekel"),
  #                    labels = c("DSWE", "JRC"))
  # 
- # ggsave(file = file.path(path.data, "plots", paste0("max correlation_withinHUC_", cor_type, ".pdf")),
+ # ggsave(file = file.path(path.plots, paste0("max correlation_withinHUC_", cor_type, ".pdf")),
  #         width = 6.4, #7
  #         height = 3.2, #4
  #         units = "in",
@@ -495,8 +471,8 @@ pk_ds_sg.int %>%
 # ---------------------------------------------------------------------- #
 # Mean and median # of gages/HUC ####
 # ---------------------------------------------------------------------- #
-# Need to incorporate the missing HUC(s) to ensure the mean is calculated correctly.
-# The missing HUC is currently hard-coded in but could get it programmatically by:
+# Incorporates the missing HUC(s) to ensure the mean is calculated correctly.
+# Missing HUC is currently hard-coded in but could get it programmatically by:
 
 # setdiff(unique(pk_ds_sg.int$huc8.img), unique(pk_ds_sg.int$huc8.sg))
 
@@ -507,7 +483,7 @@ mean_n_gages <- pk_ds_sg.int %>%
   group_by(huc8.img) %>% 
   summarise(n = sum(n())) 
 
-missing_huc <- c('18030004', 0) # this HUC had no qualifying gage to supply data
+missing_huc <- c('18030004', 0) # HUC without a qualifying gage to supply data
 
 # Add missing gage 
 mean_n_gages <- as.data.frame(rbind(missing_huc, mean_n_gages))
@@ -600,6 +576,10 @@ pk_ds_sg.series %>%
 Number of HUCs with 30+ years of data and a correlation basis > 0.7
 ```{r, echo = FALSE}
 
+# ---------------------------------------------------------------------- #
+# Number of HUCs with long data series based on high-correlation data ####
+# ---------------------------------------------------------------------- #
+
 pk_ds_sg.int.series %>% 
   ungroup() %>% 
   distinct(huc8.img) %>% 
@@ -613,6 +593,11 @@ pk_ds_sg.int.series %>%
 ####Correlation between COV and r values
 
 ```{r, echo = FALSE}
+
+# ---------------------------------------------------------------------- #
+# COV and correlation values ####
+# ---------------------------------------------------------------------- #
+
 corr_stats <-  pk_ds_sg.int %>%
   group_by(site_no, huc8.img, type, cor) %>% 
   summarise(sd = sd(mean_va),
@@ -625,7 +610,6 @@ cor(corr_stats$cor, corr_stats$cov) %>%
 
 
 ```
-
 
 <br>
 
@@ -686,7 +670,7 @@ shp %>%
      coord_sf(crs = "+init=epsg:4269")  #NAD83 GEO   
 
 # Save for publication
- # ggsave(file = file.path(path.data, "plots", paste0("imagery_w_higher_cor_", cor_type, ".pdf")),
+ # ggsave(file = file.path(path.plots, paste0("imagery_w_higher_cor_", cor_type, ".pdf")),
  #         width = 3.2,
  #         height = 3.6,
  #         units = "in",
@@ -764,7 +748,7 @@ ggplot(cor.all.max, aes(x = reorder(huc8.img, -cor), y = cor, fill = type)) +
  #                    breaks = c("dswe", "pekel"),
  #                    labels = c("DSWE", "JRC"))
  # 
- # ggsave(file = file.path(path.data, "plots", paste0("max correlation_allHUC_", cor_type, ".pdf")),
+ # ggsave(file = file.path(path.plots, paste0("max correlation_allHUC_", cor_type, ".pdf")),
  #         width = 6.4, #7
  #         height = 3.2, #4
  #         units = "in",
@@ -797,6 +781,8 @@ temp %>%
 
 ```
 <br>
+
+
 Number of gages that correspond best to imagery within/external to same HUC
 ```{r, echo = FALSE, warning = FALSE} 
 
@@ -932,10 +918,9 @@ pk_ds.cor %>%
   kable(col.names = c(paste0("# hucs w/ r > ", cor_threshold))) %>%  
   kable_styling("striped", full_width = FALSE, position = 'left') 
 
-
-
-
 ```
+
+
 #####Correlations less than `r cor_threshold`
 ```{r, echo = FALSE}
 
@@ -947,6 +932,7 @@ pk_ds.cor %>%
   filter(cor < cor_threshold) %>% 
   kable(col.names = c("HUC", "cor", "# months JRC", "# months DSWE"), digits = 2) %>%  
   kable_styling("striped", full_width = FALSE, position = 'left') 
+
 ```
 
 
@@ -992,7 +978,7 @@ pk_ds.cor %>%
 
 
 # Save for publication
- # ggsave(file = file.path(path.data, "plots", paste0("dswe_jrc_imagery_cor.pdf")),
+ # ggsave(file = file.path(path.plots, paste0("dswe_jrc_imagery_cor.pdf")),
  #         width = 3.5,
  #         height = 3.8,
  #         units = "in",
@@ -1065,8 +1051,8 @@ pk_ds.cor %>%
 #      coord_sf(crs = "+init=epsg:4269")  #NAD83 GEO   
 # 
 # 
-# # Save for publication
-#  ggsave(file = file.path(path.data, "plots", paste0("jrc_gage_correlations_", cor_type, ".pdf")),
+# # Output
+#  ggsave(file = file.path(path.plots, paste0("jrc_gage_correlations_", cor_type, ".pdf")),
 #          width = 3.5,
 #          height = 3.8,
 #          units = "in",
@@ -1081,11 +1067,11 @@ pk_ds.cor %>%
 ####Interpolated plots - within HUC
 ```{r, echo= FALSE, warning = FALSE, message = FALSE, progress_bar = FALSE, fig.height=7, fig.width=8}
 
-## *************************
-#### plots for Rmd document 
-## *************************
+# ---------------------------------------------------------------------- #
+#### Interpolated within-HUC plots - inline format ####
+# ---------------------------------------------------------------------- #
 
-# This can be rewritten such that the pk_ds_sg calls are dropped--the incoming data is already partitioned from that data frame. Leaving it for now because it works.
+# Can be rewritten such that the pk_ds_sg calls are dropped; incoming data are already partitioned from that data frame. Leaving it because it works.
 
 plot_within_huc_inline  <- function(max_cor) {
   
@@ -1106,7 +1092,6 @@ plot_within_huc_inline  <- function(max_cor) {
   pk_combined <- rbind(pk_ds_sg.all, pk_ds_sg.rec)
  
 # change names
-# thanks, ttps://stackoverflow.com/questions/3472980/ggplot-how-to-change-facet-labels
   imagery.names <-  list('dswe'= "DSWE", 'pekel' = 'JRC')
   imagery_labeller <- function(variable, value){
     return(imagery.names[value])}
@@ -1116,7 +1101,7 @@ plot_within_huc_inline  <- function(max_cor) {
   labels <-  pk_ds_sg.inp %>% group_by(type) %>% summarize(r = round(mean(cor), 2)) %>% .$r
   plot_label <-  sprintf("rho == %0.2f", labels)
 
-# Original plot
+# Plot
   p <- ggplot(pk_ds_sg.all, aes(date, water, group = type)) +  # all
         geom_line(size = .3, color = 'black') +
         geom_line(data = pk_ds_sg.inp, aes(date, water), color = 'red', size = .8) +
@@ -1143,7 +1128,8 @@ plot_within_huc_inline  <- function(max_cor) {
                y = 0.95 * plot.y.max) 
   print(p)
 
-  # ggsave(file = file.path(path.data, "plots", paste0("dswe_jrc_huc", huc_i, ".png")), 
+  # Output
+  # ggsave(file = file.path(path.plots, paste0("dswe_jrc_huc", huc_i, ".png")), 
   #       width = 5,  #7 
   #       height = 3.5, #5
   #       dpi = 600)
@@ -1156,10 +1142,9 @@ plot_within_huc_inline  <- function(max_cor) {
 
 ```{r, echo=FALSE, r, echo= FALSE, warning = FALSE, message = FALSE, progress_bar = FALSE}
 
-
-## *************************
-#### plots for publication 
-## *************************
+# ---------------------------------------------------------------------- #
+#### Interpolated within-HUC plots - publication format ####
+# ---------------------------------------------------------------------- #
 
 plot_within_huc_pub  <- function(max_cor) {
   
@@ -1190,8 +1175,7 @@ plot_within_huc_pub  <- function(max_cor) {
   plot_label <-  sprintf("rho == %0.2f", labels)
 
 
-  # Plots for publication
-
+  # Plot
   p <- ggplot(pk_ds_sg.all, aes(date, water, group = type)) +  # all
         geom_line(lwd = 0.3, color = 'black') +
         geom_line(data = pk_ds_sg.inp, aes(date, water), color = 'red', size = 0.3) +
@@ -1222,7 +1206,8 @@ plot_within_huc_pub  <- function(max_cor) {
                y = 0.95 * plot.y.max) 
   print(p)
 
-  # ggsave(file = file.path(path.data, "plots", paste0("dswe_jrc_huc_publication", huc_i, ".pdf")), 
+  # Output
+  # ggsave(file = file.path(path.plots, paste0("dswe_jrc_huc_publication", huc_i, ".pdf")), 
   #       width = 5.2,  #7 
   #       height = 3.4, #5
   #       units = "in",
@@ -1235,16 +1220,16 @@ plot_within_huc_pub  <- function(max_cor) {
 ```{r, echo = FALSE, message = FALSE, warning = FALSE, progress_bar = FALSE}
 
 # ---------------------------------------------------------------------- #
-#### Generate subset of gage::imagery time-series plots for publication
+#### Generate gage/imagery time-series plots for publication
 # ---------------------------------------------------------------------- #
 
-# pk_ds_sg.int %>% 
-#     filter(huc8.sg == huc8.img) %>% 
-#     #filter(huc8.img == '18040010') %>% 
-#     filter(huc8.img %in% c('18020004', '18020002', '18040010')) %>% 
-#     group_by(huc8.img) %>% 
-#     slice(which.max(cor))  %>% 
-#     do(df.select = plot_within_huc_pub(.)) # 'do' to pass the groups individually; 'df.select' b/c a name is necessary for some reason
+pk_ds_sg.int %>%
+    filter(huc8.sg == huc8.img) %>%
+    #filter(huc8.img == '18040010') %>%
+    filter(huc8.img %in% c('18020004', '18020002', '18040010')) %>%
+    group_by(huc8.img) %>%
+    slice(which.max(cor))  %>%
+    do(df.select = plot_within_huc_pub(.)) # 'do' to pass the groups individually; 'df.select' b/c a name is necessary for some reason
 
 ```
 <br>
@@ -1275,11 +1260,9 @@ pk_ds_sg.int %>%
 ####Interpolated plots - all HUCs
 ```{r, echo= FALSE, warning = FALSE, message = FALSE, progress_bar = FALSE, fig.height=7, fig.width=8}
 
-## *************************
-#### plots for Rmd document 
-## *************************
-
-# This can be rewritten such that the pk_ds_sg calls are dropped--the incoming data is already partitioned from that data frame. Leaving it for now because it works.
+# ---------------------------------------------------------------------- #
+#### Interpolated all-HUC plots - inline  ####
+# ---------------------------------------------------------------------- #
 
 plot_all_hucs_inline  <- function(max_cor) {
   
@@ -1337,7 +1320,8 @@ plot_all_hucs_inline  <- function(max_cor) {
 
   print(p)
 
-  # ggsave(file = file.path(path.data, "plots", paste0("dswe_jrc_huc", huc_i, "_all_gages.png")), 
+  # Output
+  # ggsave(file = file.path(path.plots, paste0("dswe_jrc_huc", huc_i, "_all_gages.png")), 
   #       width = 7, 
   #       height = 5, 
   #       dpi = 600)
