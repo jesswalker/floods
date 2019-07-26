@@ -1,5 +1,5 @@
 ---
-title: "Process and merge stream gage data with JRC and DSWE imagery in California's Central Valley"
+title: "Process and merge stream gage data with JRC/DSWE imagery in California's Central Valley"
 fontsize: 8
 author: Jessica Walker
 date: 7/19/19
@@ -25,9 +25,9 @@ editor_options:
 nodata_threshold <- 5
 
 # Set files and folders 
-# - Output file is written to path.out
-path.out <-  "E:/projects/place/data"
-file.out <- paste0("merged_imagery_gage_", nodata_threshold, "pct.RData")
+# - Output file is written to path.data
+path.data <- "C:/temp" #E:/projects/place/data"
+file.out <- paste0("merged_", nodata_threshold, "pct.RData")
 
 ```
 
@@ -65,17 +65,16 @@ loadPackages(c("data.table", # v1.12.0; fread
   - Combine stream gage, JRC, and DSWE data for all HUCs
   
 ####User actions required
-  - Specify valid local directory for output file
+  - Change default directory for output file (**`r path.data`**) if necessary
 
-####Inputs
-  - *All data are retrieved from online sources*
+####Inputs - *All data are retrieved from online sources*
   - JRC monthly composites aggregated by Central Valley HUC 
   - DSWE monthly composites aggregated by Central Valley HUC 
   - NWIS metadata for all Central Valley gages 
   - NWIS monthly records for gages meeting temporal and data requirements
 
 ####Output
-  - Consolidated file of monthly stream gage, JRC, and DSWE values written to **`r file.path(path.out, file.out)`**
+  - Consolidated file of monthly stream gage, JRC, and DSWE values written to **`r file.path(path.data, file.out)`**
 
 
  
@@ -375,7 +374,7 @@ pk_ds_sg <-  pk_ds_sg[complete.cases(pk_ds_sg[, 1]), ]
 # Save file of merged data ####
 # ---------------------------------------------------------------------- #
 
-save(pk_ds, pk, ds, pk_ds_sg, file = file.path(path.out, file.out))
+save(pk_ds, pk, ds, pk_ds_sg, file = file.path(path.data, file.out))
 
 ```
 
