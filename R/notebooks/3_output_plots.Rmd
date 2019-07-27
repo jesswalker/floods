@@ -111,7 +111,7 @@ load(file.in)
 #### Download HUC GIS data from ScienceBase ####
 # ---------------------------------------------------------------------- #
 
-# Download the shapefile if it doesn't exist
+# Download shapefile if it doesn't exist
   shp.name <- 'WBDHU8_Central_Valley_UTMz10.shp'
 
 if (!file.exists(file.path(path.shp, shp.name))) {
@@ -128,7 +128,7 @@ shp <- st_read(dsn = file.path(path.shp, shp.name), stringsAsFactors = F)
 
 ####Workflow
 * Load R image file of correlations between stream gage info and JRC/DSWE data
-* Download shapefile of study area HUCs to `r file.path(path.data, "shp")`.  shp folder is created if it doesn't already exist
+* Download shapefile of study area HUCs to `r file.path(path.data, "shp")`.  'shp' folder is created if it doesn't exist
 * Calculate and/or plot relevant statistics
   - Discharge/imagery correlation type: **`r toupper(cor_type)`** 
   - Clear-pixel threshold value: **`r nodata_threshold`**%
@@ -142,7 +142,7 @@ shp <- st_read(dsn = file.path(path.shp, shp.name), stringsAsFactors = F)
   
 ####Outputs
   - In-line results
-  - Plots of augmented JRC and DSWE time series based on within- and external-HUC gage correlations to **`r file.path(path.plots)`**
+  - Plots of interpolated JRC/DSWE time series based on within- and external-HUC gage correlations to **`r file.path(path.plots)`**
   
 <br>  
 
@@ -1065,7 +1065,6 @@ pk_ds.cor %>%
 
 ####Interpolated plots - within HUC
 
-<br>
 
 ```{r, echo= FALSE, warning = FALSE, message = FALSE, progress_bar = FALSE, fig.height=7, fig.width=8}
 
@@ -1073,7 +1072,8 @@ pk_ds.cor %>%
 #### Interpolated plots - inline format ####
 # ---------------------------------------------------------------------- #
 
-# Can be rewritten such that the pk_ds_sg calls are dropped; incoming data are already partitioned from that data frame. Leaving it because it works.
+# Can be rewritten such that the pk_ds_sg calls are dropped; incoming data are already partitioned from that data frame. 
+# Leaving it because it works, but messy table output can't be avoided this way.
 
 plots_inline <- function(max_cor, end_text) {
   
@@ -1102,22 +1102,25 @@ plots_inline <- function(max_cor, end_text) {
   plot.y.max <- max(pk_ds_sg.all$water)
   labels <-  pk_ds_sg.inp %>% group_by(type) %>% summarize(r = round(mean(cor), 2)) %>% .$r
   plot_label <-  sprintf("rho == %0.2f", labels)
-  ann_text <- data.frame(date = as.Date('1984-01-01'), water = 30, lab = "(a)",
-                         type = factor("dswe", levels = c("dswe", "pekel")))
+
 
 # Plot
   p <- ggplot(pk_ds_sg.all, aes(date, water, group = type)) +  # all
         geom_line(size = .3, color = 'black') +
-        geom_line(data = pk_ds_sg.inp, aes(date, water), color = 'red', size = 0.8) +
-        geom_point(data = pk_ds_sg.all, aes(date, water, color = interp), size = 0.6) +  #all
+        geom_line(data = pk_ds_sg.inp, aes(date, water), color = 'red', size = 0.7) + # 0.8
+        geom_point(data = pk_ds_sg.all, aes(date, water, color = interp), size = 0.75) +  #all 0.6
         scale_color_manual(values = c("black", "red"), labels = c("Measured data", "Estimated data")) +
         theme_bw() +
+        guides(colour=guide_legend(override.aes=list(size = 2))) + # set legend point size
         theme(plot.margin=unit(c(1, 1, 1, 1),"cm"),
           legend.position =  c(0.96, 1.04), #'top', 
           legend.justification = 'right',
           legend.direction = 'horizontal',
           legend.title = element_blank(),
-          legend.background = element_rect(fill = NA)) +
+          legend.background = element_rect(fill = NA),
+          legend.text = element_text(size = 10),
+          legend.key.size = unit(0.7, 'line'),
+          legend.key.width = unit(0.9, 'line')) +
         xlab("Date") +
         ylab('Surface water extent (sq km)')  +
         ggtitle(huc_name) +
@@ -1128,9 +1131,8 @@ plots_inline <- function(max_cor, end_text) {
                label = plot_label,
                parse = T,
                size = 4, 
-               x = as.Date(plot.x.max - 300, '%Y-%m-%d'), 
-               y = 0.95 * plot.y.max) +
-      geom_text(data = ann_text, label = "(a)", size = 5)
+               x = as.Date(plot.x.max - 300, '%Y-%m-%d'),  ## 300
+               y = 0.95 * plot.y.max)
   
   print(p)
 
@@ -1141,37 +1143,35 @@ plots_inline <- function(max_cor, end_text) {
         dpi = 600)
 }
 
-
-
 ```
 
 
 ```{r, echo = FALSE, message = FALSE, warning = FALSE, progress_bar = FALSE}
 
 # ---------------------------------------------------------------------- #
-#### Generate all gage::imagery time-series plots (within-huc)
+#### Generate all inline gage::imagery time-series plots (within-huc)
 # ---------------------------------------------------------------------- #
 
 end_text = '.png'
 pk_ds_sg.int %>% 
-    filter(huc8.img %in% c('18020004')) %>% #, '18020002', '18040010')) %>%  new
     filter(huc8.sg == huc8.img) %>% 
     group_by(huc8.img) %>% 
     slice(which.max(cor))  %>% 
     do(df.select = plots_inline(., end_text)) # 'do' to pass the groups individually; 'df.select' b/c a name is necessary for some reason
 
 ```
+<br>
+####Interpolated plots - all HUCs
 
 ```{r, echo = FALSE, message = FALSE, warning = FALSE, progress_bar = FALSE}
 
 # ---------------------------------------------------------------------- #
-#### Generate all gage::imagery time-series plots (all Huc)
+#### Generate all inline gage::imagery time-series plots (all Huc)
 # ---------------------------------------------------------------------- #
 
 ending = "_all_gages.png"
 
 pk_ds_sg.int %>% 
-   filter(huc8.img %in% c('18020004')) %>% 
     group_by(huc8.img) %>% 
     slice(which.max(cor))  %>% 
     do(df.select = plots_inline(., ending)) # 'do' to pass the groups individually; 'df.select' b/c a name is necessary for some reason
@@ -1180,14 +1180,13 @@ pk_ds_sg.int %>%
 
 
 
-
 ```{r, echo=FALSE, r, echo= FALSE, warning = FALSE, message = FALSE, progress_bar = FALSE, results = 'hide'}
 
 # ---------------------------------------------------------------------- #
-#### Interpolated within-HUC plots - publication format ####
+#### Interpolated plots - publication format ####
 # ---------------------------------------------------------------------- #
 
-plot_within_huc_pub  <- function(max_cor) {
+plots_pub  <- function(max_cor) {
   
   huc_i <- max_cor$huc8.img
   site_i <- max_cor$site_no
@@ -1215,7 +1214,14 @@ plot_within_huc_pub  <- function(max_cor) {
   labels <-  pk_ds_sg.inp %>% group_by(type) %>% summarize(r = round(mean(cor), 2)) %>% .$r
   plot_label <-  sprintf("rho == %0.2f", labels)
 
+  # Labels for each plot  
 
+  # a:   ann_text <- data.frame(date = as.Date('1984-01-01'), water = 30, # lab = "(a)",
+  # b:   ann_text <- data.frame(date = as.Date('1992-01-01'), water = 382, # lab = "(b)",
+  # c:   ann_text <- data.frame(date = as.Date('1991-01-01'), water = 102, lab = "(c)",
+    ann_text <- data.frame(date = as.Date('1991-01-01'), water = 105, lab = "(c)",
+                         type = factor("dswe", levels = c("dswe", "pekel")))
+  
   # Plot
   p <- ggplot(pk_ds_sg.all, aes(date, water, group = type)) +  # all
         geom_line(lwd = 0.3, color = 'black') +
@@ -1243,17 +1249,20 @@ plot_within_huc_pub  <- function(max_cor) {
                label = plot_label,
                parse = T,
                size = 3, 
-               x = as.Date(plot.x.max - 100, '%Y-%m-%d'), #300
-               y = 0.95 * plot.y.max) 
+               x = as.Date(plot.x.max - 300, '%Y-%m-%d'), # ***CHANGE HERE #300 #110 for 18040010
+               y = 0.95 * plot.y.max) +
+      geom_text(data = ann_text, label = "(c)", size = 4.5)  # ***CHANGE HERE label a, b, c
+  
   print(p)
 
   # Output
-  # ggsave(file = file.path(path.plots, paste0("dswe_jrc_huc_publication", huc_i, ".pdf")), 
-  #       width = 5.2,  #7 
-  #       height = 3.4, #5
-  #       units = "in",
-  #       dpi = 600)
+   ggsave(file = file.path(path.plots, paste0("dswe_jrc_huc_publication", huc_i, ".pdf")), 
+         width = 5.2,  #7 
+         height = 3.4, #5
+         units = "in",
+         dpi = 600)
 }
+
 
 ```
 
@@ -1265,13 +1274,13 @@ plot_within_huc_pub  <- function(max_cor) {
 # ---------------------------------------------------------------------- #
 
 # Uncomment to produce publication plots
-
-# pk_ds_sg.int %>%
+# 
+#  pk_ds_sg.int %>%
 #     filter(huc8.sg == huc8.img) %>%
-#     #filter(huc8.img == '18040010') %>%
-#     filter(huc8.img %in% c('18020004', '18020002', '18040010')) %>%
+#     filter(huc8.img == '18040010') %>%
+#     #filter(huc8.img %in% c('18020004', '18020002', '18040010')) %>%
 #     group_by(huc8.img) %>%
 #     slice(which.max(cor))  %>%
-#     do(df.select = plot_within_huc_pub(.)) # 'do' to pass the groups individually; 'df.select' b/c a name is necessary for some reason
+#     do(df.select = plots_pub(.)) # 'do' to pass the groups individually; 'df.select' b/c a name is necessary for some reason
 
 ```
