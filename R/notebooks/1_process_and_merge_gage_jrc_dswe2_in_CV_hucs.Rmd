@@ -79,7 +79,7 @@ file.out <- paste0("CV_dswe_jrc_gage_", nodata_threshold, "pct_nodata_merged.RDa
   - Consolidated file of monthly stream gage, JRC, and DSWE values written to **`r file.path(path.out, 'data', file.out)`**
 
 ####User inputs required
-  - Valid directory for output file
+  - Valid local directory for output file
  
 
 ```{r, echo = FALSE}
@@ -343,8 +343,8 @@ sg <- sg %>%
       filter(length(unique(mean_va)) > 1) %>%           # - all values are the same
       filter(mean_va >= 0) %>%                          # - gage values are negative
       filter(n() > 60) %>%                              # - < 5 yrs of overlapping data exist
-    ungroup() %>%                                       # Assign factors   
-    mutate(site_no = factor(site_no),
+  ungroup() %>%                                       # Assign factors   
+  mutate(site_no = factor(site_no),
          parameter_cd = factor(parameter_cd),
          huc8.sg = factor(huc8.sg))
 

@@ -68,16 +68,17 @@ loadPackages <- function(pkgs){
 
 # Load packages
 loadPackages(c('dataRetrieval', # 2.7.4
-               'plyr',          # 1.8.4
-               'tidyverse',     # 1.2.1
                'data.table',    # 1.12.0
-               'knitr',         # 1.21
-               'kableExtra',    # 1.0.1
                'devtools',      # 2.0.1
-               'googledrive',   # 0.1.3
-               'zoo',           # 1.8-4
                'ggmap',         # 3.0.0
-               'sf' ))          # 0.7-3
+               'googledrive',   # 0.1.3
+               'kableExtra',    # 1.0.1
+               'knitr',         # 1.21
+               'plyr',          # 1.8.4
+               'sf',            # 0.7-3
+               'tidyverse',     # 1.2.1
+               'zoo'))          # 1.8-4
+
 ```
 
 
@@ -125,13 +126,13 @@ if (!file.exists(file.path(path.shp, shp.name))) {
 shp <- st_read(dsn = file.path(path.shp, shp.name), stringsAsFactors = F)
 
 ```
+Third of 3 scripts necessary to recreate results in "Integrating stream gage data and Landsat imagery to complete time-series of surface water extents in Central Valley, California"
 
-####Workflow
-* Load R image file of correlations between stream gage info and JRC/DSWE data
-* Download shapefile of study area HUCs to `r file.path(path.data, "shp")`.  'shp' folder is created if it doesn't exist
-* Calculate and/or plot relevant statistics
-  - Discharge/imagery correlation type: **`r toupper(cor_type)`** 
-  - Clear-pixel threshold value: **`r nodata_threshold`**%
+####Script workflow
+  - Load packages: dataRetrieval, data.table, devtools, ggmap, googledrive, kableExtra, knitr, plyr, sf, tidyverse, zoo
+  - Load R image file of correlations between stream gage info and JRC/DSWE data produced by **2_calculate_correlations.Rmd**
+  - Download shapefile of study area HUCs. ('shp' folder is created if it doesn't already exist)
+  - Calculate and plot relevant statistics
 
 ####User actions required
   - Change default directory for output plots (**`r path.data`**) if necessary
@@ -1215,7 +1216,7 @@ plots_pub  <- function(max_cor) {
   plot_label <-  sprintf("rho == %0.2f", labels)
 
   # Labels for each plot  
-
+  # Uncomment only the plot being produced
   # a:   ann_text <- data.frame(date = as.Date('1984-01-01'), water = 30, # lab = "(a)",
   # b:   ann_text <- data.frame(date = as.Date('1992-01-01'), water = 382, # lab = "(b)",
   # c:   ann_text <- data.frame(date = as.Date('1991-01-01'), water = 102, lab = "(c)",
