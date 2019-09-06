@@ -31,31 +31,31 @@ cor_type <- "spearman"
 # Set files and folders 
 # - Input file is read from path.data
 # - Output file is written to path.data 
-path.data <-  "C:/temp" #E:/projects/place/data"
+path.data <-  getwd() #"C:/temp" 
 file.in <- file.path(path.data, paste0("merged_", nodata_threshold, "pct.RData"))
 file.out <- paste0("correlations_", cor_type, "_", nodata_threshold, "pct.RData")
 
 ```
-Second of 3 scripts necessary to recreate results in "Integrating stream gage data and Landsat imagery to complete time-series of surface water extents in Central Valley, California"
+Script 2 of 3 necessary to recreate results in "Integrating stream gage data and Landsat imagery to complete time-series of surface water extents in Central Valley, California"
 
 ####Script workflow
-  - Load packages: dataRetrieval, data.table, devtools, googledrive, kableExtra, knitr, plyr, tidyverse, zoo
-  - Load file of merged imagery data and stream discharge data produced by **1_process_and_merge_data.Rmd**
-  - Calculate imagery/stream correlations on within-HUC (imagery and gage located in same HUC) and external basis (imagery and gage can be in different HUCs)
+  - Loads packages: dataRetrieval, data.table, devtools, googledrive, kableExtra, knitr, plyr, tidyverse, zoo.
+  - Loads file of merged imagery data and stream discharge data produced by **1_process_and_merge_data.Rmd**.
+  - Calculates imagery/stream correlations on within-HUC (imagery and gage located in same HUC) and external basis (imagery and gage can be in different HUCs)
 
 ####User actions required
 
-  - Change directory for input/output file (**`r path.data`**) if necessary
-  - Change correlation type (**`r toupper(cor_type)`**) if necessary
+  - Change directory for input/output file if necessary. Default is the script folder.
+  - Change correlation type (**`r toupper(cor_type)`**) if necessary.
 
 ####Inputs
 
-  - R image file generated from **1_process_and_merge_data.Rmd**
+  - R image file generated from **1_process_and_merge_data.Rmd**.
   
 ####Outputs
 
-  - Inline tables of maximum correlation in each HUC by dataset and location type
-  - File of imagery/discharge correlations saved to **`r file.path(path.data, file.out)`**. This file will be accessed by **3_output_plots.Rmd**
+  - Inline tables of maximum correlation in each HUC by dataset and location type.
+  - File of imagery/discharge correlations saved to default file path. This file will be accessed by **3_output_plots.Rmd**
   
 <br>  
 

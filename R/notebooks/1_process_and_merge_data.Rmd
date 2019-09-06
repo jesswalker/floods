@@ -26,11 +26,10 @@ nodata_threshold <- 5
 
 # Set files and folders 
 # - Output file is written to path.data
-path.data <- "C:/temp" 
+path.data <- getwd() #"C:/temp" 
 file.out <- paste0("merged_", nodata_threshold, "pct.RData")
 
 ```
-
 
 ```{r, echo=FALSE, warning=FALSE, message=FALSE}
 
@@ -50,32 +49,32 @@ loadPackages <- function(pkgs){
 }
 
 loadPackages(c("data.table", # v1.12.0; fread
-               "tidyverse")) # v1.2.1 
-
+               "tidyverse",  # v1.2.1 
+                "sbtools"))  # v1.1.6
 ```
-First of 3 scripts necessary to recreate results in "Integrating stream gage data and Landsat imagery to complete time-series of surface water extents in Central Valley, California" 
+Script 1 of 3 necessary to recreate results in "Integrating stream gage data and Landsat imagery to complete time-series of surface water extents in Central Valley, California" 
 
 ####Script workflow 
-  - Load packages: data.table, tidyverse
-  - Retrieve datasets from ScienceBase: Joint Research Commission Monthly Water History v1.0 (JRC) and Dynamic Surface Water Extent (DSWE) 1984-2015 monthly composites _(currently stored in a Google Drive placeholder)_
-    - Pre-process data for consistent format, unit conversions, and missing values
-    - In scenes with > **`r nodata_threshold`%** No Data, zero out water values pending interpolation
-  - Retrieve metadata from NWIS for all Central Valley gages
-  - Filter gages for data and temporal requirements
-  - Retrieve monthly data from qualifying gages
-  - Combine stream gage, JRC, and DSWE data for all HUCs
+  - Loads packages: data.table, sbtools, tidyverse
+  - Retrieves datasets from ScienceBase: Joint Research Centre Monthly Water History v1.0 (JRC) and Dynamic Surface Water Extent (DSWE) 1984-2015 monthly composites 
+    - Pre-processes data for consistent format, unit conversions, and missing values
+    - In scenes with > **`r nodata_threshold`%** No Data, zeroes out water values pending interpolation
+  - Retrieves metadata from the USGS National Water Information Service (NWIS) for all study area gages
+  - Filters gages for data and temporal requirements
+  - Retrieves monthly data from NWIS for all qualifying gages
+  - Combines stream gage, JRC, and DSWE data for all HUCs
   
 ####User actions required
-  - Change default directory for output file (**`r path.data`**) if necessary
+  - Change directory for output file if desired. The default is the script folder. 
 
 ####Inputs - *All data retrieved from online sources*
   - JRC monthly composites aggregated by Central Valley HUC 
   - DSWE monthly composites aggregated by Central Valley HUC 
-  - NWIS metadata for all Central Valley gages 
+  - NWIS metadata for all study area gages 
   - NWIS monthly records for gages meeting temporal and data requirements
 
 ####Output
-  - Consolidated file of monthly stream gage, JRC, and DSWE values written to **`r file.path(path.data, file.out)`**.  This file will be accessed by **2_calculate_correlations.Rmd**
+  - Consolidated file of monthly stream gage, JRC, and DSWE values written to <**default file path**>**/`r file.out`**.  This file will be accessed by **2_calculate_correlations.Rmd**
 
 
  
@@ -117,11 +116,10 @@ return(df)
 #### Get JRC data ####
 # ---------------------------------------------------------------------- #
 
-# Get JRC monthly composites within all Central Valley HUCs
-# MyDrive/WORK/__PLACE/GEE_output/pekel_monthly_CV_HUC8s_Albers.csv
-
-data_url = "1neHmlcTseqKTlF5tRs38Ruawzua-hCtc"
-f.csv <- read.csv(sprintf("https://docs.google.com/uc?id=%s&export=download", data_url))
+# Get JRC monthly composites within all Central Valley HUCs from ScienceBase
+data_item <- item_get("5d646666e4b09b198a26bc33") # item ID
+data_url <- data_item$files[[1]]['url'][[1]]
+f.csv <- read.csv(data_url, header = TRUE)
 pk <- process_jrc(f.csv, nodata_threshold)
 
 # Somehow date goes awry
@@ -191,10 +189,10 @@ return(df)
 #### Get DSWE data ####
 # ---------------------------------------------------------------------- #
 
-# Get DSWE monthly composites across entire CV HUCSs
-# my drive/WORK/__PLACE/GEE_output/dswe2_0_monthly_HUC_summaries_1984_2016_hlshd9.csv  17Mar19
-data_url = "1yBa-6-YgShQ82vVF4hA4Q3u3lBOADPZb"
-f.csv <- read.csv(sprintf("https://docs.google.com/uc?id=%s&export=download", data_url))
+# Get DSWE monthly composites across entire CV HUCs from ScienceBase
+data_item <- item_get("5d64655be4b09b198a26bc30") # Data item ID in ScienceBase
+data_url <- data_item$files[[1]]['url'][[1]]
+f.csv <- read.csv(data_url, header = TRUE)
 ds <- process_dswe(f.csv, nodata_threshold)
 
 ```
